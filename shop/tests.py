@@ -219,3 +219,44 @@ class ShopFlowTests(TestCase):
     def test_dashboard_still_renders(self):
         self.staff(sales_view=True, sales_edit=True, can_access_dashboard=True)
         self.assertIn(self.client.get(reverse('web:home')).status_code, (200, 302))
+
+
+@override_settings(ALLOWED_HOSTS=['*'])
+class TrackOrderTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.rice = make_product('Rice 5kg', '650.00', 10)
+        body = {'name': 'Rahim', 'phone': '01712345678', 'address': 'Mirpur, Dhaka',
+                'items': [{'id': self.rice.pk, 'qty': 2}]}
+        r = self.client.post(reverse('shop:place_order'), json.dumps(body), content_type='application/json')
+        self.order_no = r.json()['order_no']
+
+    def track(self, order_no, phone):
+        return self.client.post(reverse('shop:track_order'), json.dumps({'order_no': order_no, 'phone': phone}),
+                                content_type='application/json')
+
+    def test_track_with_correct_phone(self):
+        r = self.track(self.order_no, '01712345678')
+        self.assertEqual(r.status_code, 200, r.content)
+        d = r.json()
+        self.assertEqual(d['status'], 'pending')
+        self.assertEqual(d['items'][0]['qty'], 2)
+
+    def test_phone_format_and_short_order_number(self):
+        self.assertEqual(self.track(self.order_no, '+8801712345678').status_code, 200)
+        self.assertEqual(self.track(str(ShopOrder.objects.get().pk), '017-1234-5678').status_code, 200)
+
+    def test_wrong_phone_reveals_nothing(self):
+        r = self.track(self.order_no, '01999999999')
+        self.assertEqual(r.status_code, 404)
+        self.assertNotIn('Rahim', r.content.decode())
+
+    def test_status_follows_admin_changes(self):
+        o = ShopOrder.objects.get()
+        o.status = 'confirmed'; o.save()
+        self.assertEqual(self.track(self.order_no, '01712345678').json()['status'], 'confirmed')
+
+    def test_rate_limited(self):
+        for _ in range(20):
+            self.track(self.order_no, '01999999999')
+        self.assertEqual(self.track(self.order_no, '01712345678').status_code, 429)
