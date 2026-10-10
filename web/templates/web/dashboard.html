@@ -24,12 +24,12 @@
   </div>
 
   {% if shop_url %}
-  <section class="panel">
+  <section class="panel dash-shop">
     <div class="panel-head">
       <h3>Online Shop</h3>
       <span>{{ shop_pending }} new order{{ shop_pending|pluralize }} waiting</span>
     </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <div class="panel-body shop-actions">
       <a class="btn btn-primary" href="{% url 'web:shop_orders' %}">View orders{% if shop_pending %} ({{ shop_pending }}){% endif %}</a>
       <a class="btn btn-ghost" href="{% url 'web:shop_settings' %}">Shop settings</a>
       <a class="btn btn-ghost" href="{{ shop_url }}" target="_blank" rel="noopener">Open shop</a>

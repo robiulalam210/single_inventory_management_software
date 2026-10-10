@@ -25,6 +25,7 @@ from .models import ShopOrder, ShopOrderItem, ShopSettings
 MAX_ITEMS = 50
 MAX_ORDERS_PER_WINDOW = 5      # একই IP থেকে
 WINDOW_SECONDS = 10 * 60
+MAX_TRACKS_PER_WINDOW = 20     # অর্ডার ট্র্যাক করার চেষ্টা, একই IP থেকে
 PHONE_RE = re.compile(r'^\+?\d{10,15}$')
 SECTION_SIZE = 8
 NEW_DAYS = 14
@@ -113,6 +114,7 @@ def _render_store(request):
         'delivery': {'charge': float(ss.delivery_charge), 'freeMin': float(ss.free_delivery_min)},
         'isOpen': ss.is_open,
         'orderUrl': reverse('shop:place_order'),
+        'trackUrl': reverse('shop:track_order'),
     }
 
     user = request.user
@@ -210,3 +212,57 @@ def place_order_view(request):
         return JsonResponse({'ok': False, 'error': str(e)}, status=409)
     cache.set(key, (cache.get(key) or 0) + 1, WINDOW_SECONDS)
     return JsonResponse({'ok': True, 'order_no': order.order_no, 'total': float(total), 'delivery': float(delivery)})
+
+
+def _digits(s):
+    return re.sub(r'\D', '', s or '')
+
+
+def _same_phone(a, b):
+    """+88 / 0 দিয়ে লিখলেও মিলবে — শেষের ১০ ডিজিট তুলনা করা হয়"""
+    a, b = _digits(a), _digits(b)
+    return len(a) >= 10 and len(b) >= 10 and a[-10:] == b[-10:]
+
+
+@require_POST
+@csrf_protect
+def track_order_view(request):
+    """কাস্টমার অর্ডার নম্বর + ফোন দিয়ে নিজের অর্ডারের অবস্থা দেখে (login লাগে না)।
+    অর্ডার নম্বর ক্রমিক (WEB-00001...) তাই ফোন না মিললে কিছুই জানানো হয় না — অন্যের অর্ডার দেখা যাবে না।"""
+    key = f"shop-track:{_ip(request)}"
+    if (cache.get(key) or 0) >= MAX_TRACKS_PER_WINDOW:
+        return JsonResponse({'ok': False, 'error': 'Too many attempts. Please try again in a few minutes.'}, status=429)
+    cache.set(key, (cache.get(key) or 0) + 1, WINDOW_SECONDS)
+
+    try:
+        data = json.loads(request.body or '{}')
+    except ValueError:
+        return JsonResponse({'ok': False, 'error': 'Invalid request.'}, status=400)
+
+    order_no = (data.get('order_no') or '').strip().upper()
+    phone = data.get('phone') or ''
+    if order_no.isdigit():                       # "12" বা "00012" লিখলেও চলবে
+        order_no = f"WEB-{int(order_no):05d}"
+    not_found = JsonResponse({'ok': False, 'error': 'No order found. Please check the order number and phone number.'}, status=404)
+    if not order_no or not _digits(phone):
+        return JsonResponse({'ok': False, 'error': 'Enter your order number and the phone number you used.'}, status=400)
+
+    order = ShopOrder.objects.filter(order_no=order_no).prefetch_related('items').first()
+    if order is None or not _same_phone(order.phone, phone):
+        return not_found
+
+    subtotal = sum((i.line_total for i in order.items.all()), Decimal('0.00'))
+    return JsonResponse({
+        'ok': True,
+        'order_no': order.order_no,
+        'status': order.status,
+        'placed': timezone.localtime(order.created_at).strftime('%d %b %Y, %I:%M %p'),
+        'updated': timezone.localtime(order.updated_at).strftime('%d %b %Y, %I:%M %p'),
+        'name': order.customer_name,
+        'address': order.address,
+        'items': [{'name': i.product_name, 'qty': i.qty, 'price': float(i.unit_price), 'total': float(i.line_total)}
+                  for i in order.items.all()],
+        'subtotal': float(subtotal),
+        'delivery': float(order.delivery_charge),
+        'total': float(order.total),
+    })

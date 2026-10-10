@@ -252,13 +252,40 @@
     @media (max-width:640px){.toast{bottom:88px}}
     .fly{position:fixed;left:0;top:0;z-index:70;width:54px;height:54px;border-radius:50%;object-fit:cover;pointer-events:none;box-shadow:0 10px 24px -6px rgba(0,0,0,.5);background:var(--gold);color:var(--gold-ink);display:grid;place-items:center;font-weight:700;border:2px solid #fff}
 
+    /* ---------- order tracking ---------- */
+    .modal.tm>div{display:block;max-width:520px;grid-template-columns:none}
+    .tmh{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;font-size:18px;position:sticky;top:0;background:var(--card);z-index:2}
+    .tmb{padding:18px 20px 22px;display:flex;flex-direction:column;gap:12px}
+    .recent{display:flex;gap:8px;flex-wrap:wrap}
+    .recent button{border:1px solid var(--line);background:var(--soft);color:var(--ink);border-radius:99px;padding:6px 13px;font-size:13px;font-weight:600;cursor:pointer;transition:border-color .2s,background .2s}
+    .recent button:hover{border-color:var(--brand-ink);background:var(--card)}
+    .pill{display:inline-flex;align-items:center;gap:7px;border-radius:99px;padding:5px 13px;font-size:13px;font-weight:700;background:var(--gold-soft);color:var(--gold-ink)}
+    :root[data-theme=dark] .pill{color:var(--gold)}
+    .pill.confirmed{background:var(--soft2);color:var(--brand-ink)}.pill.delivered{background:var(--brand);color:var(--on-brand)}.pill.cancelled{background:color-mix(in srgb,var(--red) 16%,var(--card));color:var(--red)}
+    .tl{display:flex;flex-direction:column;margin:8px 0 4px}
+    .ts{display:flex;gap:13px;position:relative;padding-bottom:20px}
+    .ts:last-child{padding-bottom:0}
+    .ts::before{content:"";position:absolute;left:13px;top:30px;bottom:2px;width:2px;background:var(--line);border-radius:2px}
+    .ts:last-child::before{display:none}
+    .ts.s-done::before{background:var(--brand)}
+    .dot{width:28px;height:28px;border-radius:50%;border:2px solid var(--line);background:var(--card);display:grid;place-items:center;flex:none;font-size:13px;font-weight:700;color:var(--muted);z-index:1}
+    .ts.s-done .dot{background:var(--brand);border-color:var(--brand);color:var(--on-brand);animation:popin .45s var(--ease) both}
+    .ts.s-now .dot{border-color:var(--gold);background:var(--gold-soft);color:var(--gold-ink);animation:pulse 1.8s ease-out infinite}
+    .ts.s-bad .dot{background:var(--red);border-color:var(--red);color:#fff;animation:popin .45s var(--ease) both}
+    .ts b{display:block;font-size:15px;line-height:1.3}.ts span.h{font-size:13px;color:var(--muted)}
+    .ts.s-todo b{color:var(--muted);font-weight:500}
+    @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(233,176,75,.6)}100%{box-shadow:0 0 0 12px rgba(233,176,75,0)}}
+    .tbox{background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;font-size:14px}
+    .lbl-s{display:inline}
+    @media (max-width:640px){.lbl-s{display:none}.hbtn.tk{padding:8px 11px}}
+
     @media (prefers-reduced-motion:reduce){
       *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
       .rv,.hero .tx>*,.hero .im .frame,.hero .float{opacity:1!important;transform:none!important}
     }
   </style>
 </head>
-<body x-data="shop()" x-cloak @keydown.escape.window="open = false; view = null" @scroll.window.passive="onScroll()">
+<body x-data="shop()" x-cloak @keydown.escape.window="open = false; view = null; trackOpen = false" @scroll.window.passive="onScroll()">
   {% csrf_token %}
   {{ data|json_script:"shop-data" }}
 
@@ -276,6 +303,7 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
         <input type="search" x-model="q" @input="if(q) scrollToAll()" placeholder="Search honey, dates, oil, spices…">
       </label>
+      <button class="hbtn tk" @click="openTrack()" aria-label="Track order" title="Track your order"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:-3px"><path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17.5" r="1.5"/><circle cx="17" cy="17.5" r="1.5"/></svg><span class="lbl-s"> Track order</span></button>
       {% if can_orders %}<a class="hbtn hide-s" href="{% url 'web:shop_orders' %}">Orders{% if pending_orders %} ({{ pending_orders }}){% endif %}</a>{% endif %}
       {% if user.is_authenticated %}
         <a class="hbtn hide-s" href="{% url 'web:home' %}">{% if is_staff_user %}Dashboard{% else %}Account{% endif %}</a>
@@ -401,6 +429,7 @@
           <h4>Shop</h4>
           <a href="#all" @click.prevent="cat = 0; q = ''; scrollToAll()">All products</a>
           <a href="#top" @click.prevent="cat = 0; q = ''; window.scrollTo({top: 0, behavior: 'smooth'})">Special offers</a>
+          <a href="#" @click.prevent="openTrack()">Track your order</a>
           <a href="#contact">Contact</a>
         </div>
         <div class="col">
@@ -427,7 +456,7 @@
 
   <div class="toast" :class="{ bad: toast.bad }" x-show="toast.show" x-transition:enter="tr-pop" x-transition:enter-start="tr-pop-from" x-transition:enter-end="tr-pop-to" x-transition:leave="tr-pop" x-transition:leave-start="tr-pop-to" x-transition:leave-end="tr-pop-from" role="status"><i x-text="toast.bad ? '!' : '✓'"></i><span x-text="toast.msg"></span></div>
 
-  <div class="scrim" x-show="open || view" x-transition.opacity @click="open = false; view = null"></div>
+  <div class="scrim" x-show="open || view || trackOpen" x-transition.opacity @click="open = false; view = null; trackOpen = false"></div>
 
   <aside class="sheet" x-show="open" x-transition:enter="tr-slide" x-transition:enter-start="tr-from" x-transition:enter-end="tr-to" x-transition:leave="tr-slide" x-transition:leave-start="tr-to" x-transition:leave-end="tr-from" role="dialog" aria-label="Cart">
     <div class="hd"><b x-text="done ? 'Order placed' : 'Your order'"></b><button class="x" @click="open = false" aria-label="Close">&times;</button></div>
@@ -436,7 +465,9 @@
         <svg class="ok" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="24"/><path d="M15 27l8 8 15-17"/></svg>
         <p style="margin:0 0 4px;font-size:18px;font-weight:600">Thank you!</p><b style="font-size:22px" x-text="done.order_no"></b>
         <p class="muted">We received your order of <span x-text="money(done.total)"></span>. We will call you to confirm.</p>
-        <button class="primary" @click="reset()">Continue shopping</button></div>
+        <p class="muted" style="font-size:13px;margin:0 0 14px">Save this number. You can check your order status any time with <b>Track order</b>.</p>
+        <button class="primary" style="margin-bottom:10px" @click="trackDone()">Track this order</button>
+        <button class="hbtn" style="width:100%;padding:12px" @click="reset()">Continue shopping</button></div>
     </template>
     <template x-if="!done">
       <div class="bd">
@@ -489,6 +520,52 @@
     </div></template>
   </div>
 
+  <div class="modal tm" x-show="trackOpen" x-transition:enter="tr-pop" x-transition:enter-start="tr-pop-from" x-transition:enter-end="tr-pop-to" x-transition:leave="tr-pop" x-transition:leave-start="tr-pop-to" x-transition:leave-end="tr-pop-from" @click.self="trackOpen = false">
+    <div role="dialog" aria-label="Track your order">
+      <div class="tmh"><b>Track your order</b><button class="x" @click="trackOpen = false" aria-label="Close">&times;</button></div>
+      <div class="tmb">
+        <template x-if="!tres">
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <p class="muted" style="margin:0;font-size:14px">Enter the order number from your confirmation and the phone number you ordered with.</p>
+            <div class="recent" x-show="mine.length"><template x-for="o in mine" :key="o.no"><button @click="tf.no = o.no; tf.phone = o.phone; track()" x-text="o.no"></button></template></div>
+            <input x-model="tf.no" placeholder="Order number (e.g. WEB-00012)" autocomplete="off" @keydown.enter="track()">
+            <input x-model="tf.phone" placeholder="Phone number" inputmode="tel" autocomplete="tel" @keydown.enter="track()">
+            <p class="err" x-text="terr" x-show="terr"></p>
+            <button class="primary" :disabled="tbusy" @click="track()" x-text="tbusy ? 'Checking…' : 'Track order'"></button>
+          </div>
+        </template>
+        <template x-if="tres">
+          <div style="display:flex;flex-direction:column;gap:14px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+              <div><b style="font-size:20px" x-text="tres.order_no"></b><div class="muted" style="font-size:12px" x-text="'Placed ' + tres.placed"></div></div>
+              <span class="pill" :class="tres.status" x-text="statusLabel"></span>
+            </div>
+            <p style="margin:0;font-size:14px;color:var(--ink2)" x-text="statusText"></p>
+            <div class="tl">
+              <template x-for="st in tsteps" :key="st.key">
+                <div class="ts" :class="'s-' + st.state">
+                  <span class="dot" x-text="st.state === 'done' ? '✓' : (st.state === 'bad' ? '✕' : (st.state === 'now' ? '●' : ''))"></span>
+                  <div><b x-text="st.label"></b><span class="h" x-text="st.hint"></span></div>
+                </div>
+              </template>
+            </div>
+            <div class="tbox">
+              <template x-for="(it, i) in tres.items" :key="i"><div class="row"><span x-text="it.name + ' × ' + it.qty"></span><span x-text="money(it.total)"></span></div></template>
+              <div class="row muted" style="border-top:1px dashed var(--line);padding-top:6px"><span>Delivery</span><span x-text="tres.delivery ? money(tres.delivery) : 'Free'"></span></div>
+              <div class="row"><b>Total</b><b x-text="money(tres.total)"></b></div>
+            </div>
+            <div class="muted" style="font-size:13px"><b style="color:var(--ink2)">Deliver to:</b> <span x-text="tres.address"></span></div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap">
+              <button class="hbtn" style="flex:1;padding:11px" :disabled="tbusy" @click="track()" x-text="tbusy ? 'Refreshing…' : 'Refresh status'"></button>
+              <button class="hbtn" style="flex:1;padding:11px" @click="tres = null; terr = ''">Check another order</button>
+            </div>
+            {% if ss.phone %}<a class="muted" style="font-size:13px;text-align:center" href="tel:{{ ss.phone }}">Questions? Call {{ ss.phone }}</a>{% endif %}
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
 <script>
 function shop() {
   const D = JSON.parse(document.getElementById('shop-data').textContent);
@@ -499,6 +576,7 @@ function shop() {
   return {
     D, dark: false, q: '', cat: 0, sort: 'new', open: false, view: null, cart: {}, busy: false, error: '', done: null,
     scrolled: false, top: false, bumping: false, toast: { show: false, msg: '', bad: false },
+    trackOpen: false, tf: { no: '', phone: '' }, tres: null, terr: '', tbusy: false, mine: [], tTimer: null,
     f: { name: '', phone: '', address: '', note: '' },
     init() {
       this.dark = this.isDark();
@@ -506,8 +584,13 @@ function shop() {
       try { this.cart = JSON.parse(localStorage.getItem('shop-cart') || '{}'); } catch (e) { this.cart = {}; }
       for (const id of Object.keys(this.cart)) if (!byId[id]) delete this.cart[id];
       this.$watch('cart', v => { try { localStorage.setItem('shop-cart', JSON.stringify(v)); } catch (e) {} });
-      this.$watch('open', v => { document.body.style.overflow = (v || this.view) ? 'hidden' : ''; });
-      this.$watch('view', v => { document.body.style.overflow = (v || this.open) ? 'hidden' : ''; });
+      try { this.mine = JSON.parse(localStorage.getItem('shop-orders') || '[]'); } catch (e) { this.mine = []; }
+      const lock = () => { document.body.style.overflow = (this.open || this.view || this.trackOpen) ? 'hidden' : ''; };
+      this.$watch('open', lock); this.$watch('view', lock);
+      this.$watch('trackOpen', v => {
+        lock(); clearInterval(this.tTimer);
+        if (v) this.tTimer = setInterval(() => { if (this.tres && !['delivered', 'cancelled'].includes(this.tres.status)) this.track(true); }, 30000);
+      });
       this.$nextTick(() => this.watchReveal());
     },
     /* scroll-in animation for anything with .rv, including cards Alpine renders later */
@@ -583,6 +666,57 @@ function shop() {
       ], { duration: 750, easing: 'cubic-bezier(.4,0,.2,1)' });
       an.onfinish = () => el.remove();
     },
+    /* ---- order tracking ---- */
+    csrf() { return document.querySelector('[name=csrfmiddlewaretoken]').value; },
+    saveMine(no, phone) {
+      this.mine = [{ no, phone }, ...this.mine.filter(o => o.no !== no)].slice(0, 5);
+      try { localStorage.setItem('shop-orders', JSON.stringify(this.mine)); } catch (e) {}
+    },
+    openTrack(no, phone) {
+      this.open = false; this.view = null; this.tres = null; this.terr = '';
+      if (no) this.tf.no = no;
+      if (phone) this.tf.phone = phone; else if (!this.tf.phone && this.mine[0]) this.tf.phone = this.mine[0].phone;
+      this.trackOpen = true;
+      if (no && this.tf.phone) this.track();
+    },
+    trackDone() { const no = this.done.order_no, ph = this.f.phone; this.reset(); this.openTrack(no, ph); },
+    async track(silent) {
+      if (!silent) { this.terr = ''; this.tbusy = true; }
+      try {
+        const res = await fetch(D.trackUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': this.csrf() },
+          body: JSON.stringify({ order_no: this.tf.no, phone: this.tf.phone }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok || !d.ok) { if (!silent) { this.tres = null; this.terr = d.error || 'Could not check the order. Please try again.'; } return; }
+        this.tres = d; this.tf.no = d.order_no; this.saveMine(d.order_no, this.tf.phone);
+      } catch (e) { if (!silent) this.terr = 'Network problem. Please try again.'; }
+      finally { this.tbusy = false; }
+    },
+    get statusLabel() { return ({ pending: 'Received', confirmed: 'Confirmed', delivered: 'Delivered', cancelled: 'Cancelled' })[this.tres && this.tres.status] || ''; },
+    get statusText() {
+      return ({
+        pending: 'We received your order. We will call you soon to confirm it.',
+        confirmed: 'Your order is confirmed and is being prepared for delivery.',
+        delivered: 'Your order was delivered. Thank you for shopping with us.',
+        cancelled: 'This order was cancelled. Call us if you have any questions.',
+      })[this.tres && this.tres.status] || '';
+    },
+    get tsteps() {
+      const s = this.tres && this.tres.status;
+      const st = (i, cur) => i < cur ? 'done' : (i === cur ? 'now' : 'todo');
+      if (s === 'cancelled') return [
+        { key: 'p', label: 'Order received', hint: this.tres.placed, state: 'done' },
+        { key: 'c', label: 'Cancelled', hint: this.tres.updated, state: 'bad' },
+      ];
+      const cur = ({ pending: 1, confirmed: 2, delivered: 3 })[s] ?? 1;
+      return [
+        { key: 'p', label: 'Order received', hint: this.tres.placed, state: 'done' },
+        { key: 'c', label: 'Confirmed', hint: cur >= 2 ? 'We called and confirmed your order' : 'We will call you to confirm', state: st(1, cur) },
+        { key: 'd', label: 'Delivered', hint: cur >= 3 ? this.tres.updated : 'Delivery to your address', state: st(2, cur) },
+      ];
+    },
     pickCat(id) { this.cat = id; this.scrollToAll(); },
     scrollToAll() { this.$nextTick(() => document.getElementById('all').scrollIntoView({ behavior: 'smooth' })); },
     money(v) { return '৳' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 }); },
@@ -597,7 +731,7 @@ function shop() {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.ok) { this.error = data.error || 'Could not place the order. Please try again.'; return; }
-        this.done = data;
+        this.done = data; this.saveMine(data.order_no, this.f.phone);
       } catch (e) { this.error = 'Network problem. Please try again.'; }
       finally { this.busy = false; }
     },
