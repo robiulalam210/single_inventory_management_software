@@ -1,6 +1,6 @@
 {% extends "web/base.html" %}
 {% block content %}
-<form method="post" enctype="multipart/form-data" novalidate>
+<form method="post" enctype="multipart/form-data" novalidate class="shop-page set-page">
   {% csrf_token %}
 
   <section class="panel">
@@ -8,9 +8,11 @@
       <h3>Your shop page</h3>
       <span>Customers see this at your home page</span>
     </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <a class="btn btn-ghost" href="{{ shop_url }}" target="_blank" rel="noopener">Open shop</a>
-      <a class="btn btn-ghost" href="{% url 'web:shop_orders' %}">Online orders</a>
+    <div class="panel-body">
+      <div class="shop-actions">
+        <a class="btn btn-ghost" href="{{ shop_url }}" target="_blank" rel="noopener">Open shop</a>
+        <a class="btn btn-ghost" href="{% url 'web:shop_orders' %}">Online orders</a>
+      </div>
     </div>
   </section>
 
@@ -19,42 +21,34 @@
   {% for title, hint, fields in groups %}
   <section class="panel">
     <div class="panel-head"><h3>{{ title }}</h3><span>{{ hint }}</span></div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:4px 16px">
-      {% for f in fields %}
-      <div class="field"{% if f.name == "about_text" or f.name == "hero_subtitle" or f.name == "announcement" or f.name == "address" %} style="grid-column:1/-1"{% endif %}>
-        {% if f.field.widget.input_type == "checkbox" %}
-          <label style="display:flex;gap:8px;align-items:center;font-size:14px">{{ f }} {{ f.label }}</label>
-        {% else %}
-          <label class="field-label" for="{{ f.id_for_label }}">{{ f.label }}</label>
-          {% if f.name == "hero_image" and current_hero %}
-            <img src="{{ current_hero }}" alt="" style="display:block;max-width:240px;max-height:120px;border-radius:8px;margin-bottom:8px;border:1px solid var(--line)">
-          {% endif %}
-          {% if f.name == "brand_color" %}
-            <div style="display:flex;gap:8px;align-items:center">{{ f }}</div>
-          {% elif f.field.widget.input_type == "file" %}
-            {{ f }}
+    <div class="panel-body">
+      <div class="set-grid">
+        {% for f in fields %}
+        <div class="field{% if f.field.widget.input_type == "checkbox" %} wide{% endif %}{% if f.name == "about_text" or f.name == "hero_subtitle" or f.name == "announcement" or f.name == "address" %} wide{% endif %}">
+          {% if f.field.widget.input_type == "checkbox" %}
+            <label class="set-check">{{ f }} <span>{{ f.label }}</span></label>
           {% else %}
-            <div class="input-wrap">{{ f }}</div>
+            <label class="field-label" for="{{ f.id_for_label }}">{{ f.label }}</label>
+            {% if f.field.widget.input_type == "file" %}
+              <div class="set-file">
+                {% if f.name == "hero_image" and current_hero %}<img src="{{ current_hero }}" alt="Current banner">{% endif %}
+                <input type="file" name="{{ f.html_name }}" id="{{ f.id_for_label }}" accept="image/*">
+              </div>
+            {% else %}
+              {{ f }}
+            {% endif %}
           {% endif %}
-        {% endif %}
-        {% if f.help_text %}<small style="color:var(--muted)">{{ f.help_text }}</small>{% endif %}
-        {% for e in f.errors %}<small class="field-error" style="color:var(--red);display:block">{{ e }}</small>{% endfor %}
+          {% if f.help_text %}<small>{{ f.help_text }}</small>{% endif %}
+          {% for e in f.errors %}<span class="field-err">{{ e }}</span>{% endfor %}
+        </div>
+        {% endfor %}
       </div>
-      {% endfor %}
     </div>
   </section>
   {% endfor %}
 
-  <div style="display:flex;justify-content:flex-end;padding-bottom:24px">
+  <div class="set-save">
     <button class="btn btn-primary" type="submit">Save settings</button>
   </div>
 </form>
-
-<style>
-  .input-wrap input:not([type=checkbox]), .input-wrap textarea, .input-wrap select {
-    width: 100%; padding: 10px 12px; border: 1px solid var(--line-2, var(--line)); border-radius: 10px;
-    background: var(--surface, #fff); color: var(--ink, inherit); font: inherit;
-  }
-  input[type=color] { width: 56px; height: 38px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: transparent; }
-</style>
 {% endblock %}
