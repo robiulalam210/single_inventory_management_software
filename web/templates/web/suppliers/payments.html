@@ -1,0 +1,198 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/suppliers.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  {% if can_create %}<a class="btn btn-primary top-act" href="{% url 'web:supplier_pay' %}">{% icon "plus" 18 %}<span>Pay supplier</span></a>{% endif %}
+{% endblock %}
+{% block content %}
+<div x-data="supplierPaymentList({ canCancel: {{ can_cancel|yesno:'true,false' }} })"
+     @keydown.escape.window="confirmCancel ? (confirmCancel = false) : shut()">
+
+  <section class="panel filters">
+    <div class="f-row">
+      <label class="f-search">
+        {% icon "search" 18 %}
+        <input type="search" x-model="f.q" placeholder="Search payment no., supplier, phone, invoice or reference" aria-label="Search payments">
+      </label>
+      <div class="seg seg-sm" role="tablist" aria-label="Period">
+        <template x-for="p in presets" :key="p.key">
+          <button type="button" :class="{ 'is-on': f.preset === p.key }" @click="setPreset(p.key)" x-text="p.label"></button>
+        </template>
+      </div>
+    </div>
+    <div class="f-row" x-show="f.preset === 'custom'" x-cloak>
+      <label class="f-date"><span>From</span><input type="date" x-model="f.from" @change="applyCustom()"></label>
+      <label class="f-date"><span>To</span><input type="date" x-model="f.to" @change="applyCustom()"></label>
+    </div>
+    <div class="f-row">
+      <div class="chips" role="radiogroup" aria-label="Payment type">
+        <template x-for="t in types" :key="t.key">
+          <button type="button" class="chip" role="radio" :aria-checked="(f.type === t.key).toString()"
+                  :class="{ 'is-on': f.type === t.key }" @click="f.type = t.key" x-text="t.label"></button>
+        </template>
+      </div>
+      <div class="f-combos">
+        {% include "web/_combo.html" with model="f.supplier" source="suppliers" placeholder="All suppliers" icon="store" %}
+        {% include "web/_combo.html" with model="f.method" source="methods" placeholder="All methods" icon="wallet" %}
+        <button type="button" class="btn-link" x-show="filtered" x-cloak @click="clearAll()">{% icon "filter-x" 16 %} Reset</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="sumbar" aria-live="polite">
+    <div><span>Payments</span><b x-text="sum ? num(sum.total_payments) : '—'"></b></div>
+    <div><span>Total paid</span><b x-text="sum ? taka(sum.total_amount) : '—'"></b></div>
+    <div><span>From your accounts</span><b x-text="sum ? taka(sum.cash_paid) : '—'"></b></div>
+    <div><span>From supplier advance</span><b x-text="sum ? taka(sum.advance_used) : '—'"></b></div>
+    <div class="sum-period"><span>Period</span><b x-text="periodText"></b>
+      <small class="sum-note" x-show="sum && sum.cancelled_count && f.type !== 'cancelled'" x-text="sum && (sum.cancelled_count + ' cancelled not counted')"></small></div>
+  </div>
+
+  <section class="panel">
+    <template x-if="error">
+      <div class="empty">
+        <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2>Couldn't load payments</h2>
+        <p x-text="error"></p>
+        <button class="btn btn-ghost" @click="fetch()">Try again</button>
+      </div>
+    </template>
+    <template x-if="!error">
+      <div>
+        <table class="dt" :class="{ 'is-loading': loading }">
+          <thead>
+            <tr>
+              <th>Payment</th>
+              <th>Paid to</th>
+              <th>Applied to</th>
+              <th class="hide-md">From</th>
+              <th class="num">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in rows" :key="r.id">
+              <tr tabindex="0" @click="open(r)" @keydown.enter="open(r)" :aria-label="'Open payment ' + r.sp_no" :class="{ 'is-void': r.status === 'cancelled' }">
+                <td data-k="Receipt"><b class="inv" x-text="r.sp_no"></b><span class="sub" x-text="date(r.payment_date)"></span></td>
+                <td data-k="Customer"><b x-text="r.supplier_name"></b><span class="sub" x-text="r.supplier_phone || ''"></span></td>
+                <td data-k="Applied">
+                  <span class="tag" :class="r.status === 'cancelled' ? '' : 'tg-' + r.payment_type" x-text="r.status === 'cancelled' ? 'Cancelled' : appliedTo(r)"></span>
+                </td>
+                <td class="hide-md" data-k="Method" x-text="paidFrom(r)"></td>
+                <td class="num" data-k="Amount"><b x-text="taka(r.amount)"></b>
+                  <span class="sub" x-show="Number(r.advance_amount_used) > 0" x-text="taka(r.advance_amount_used) + ' from advance'"></span></td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !rows.length ? 6 : 0)" :key="'sk' + i">
+              <tr class="sk-row"><td colspan="5"><span class="sk-line"></span></td></tr>
+            </template>
+          </tbody>
+        </table>
+
+        <template x-if="!loading && !rows.length">
+          <div class="empty">
+            <div class="tile">{% icon "coins" 26 %}</div>
+            <h2 x-text="filtered ? 'No payments match these filters' : 'No supplier payments this month yet'"></h2>
+            <p x-text="filtered ? 'Try a wider date range or clear the filters.' : 'Money you pay to suppliers will appear here.'"></p>
+            <button class="btn btn-ghost" x-show="filtered" @click="clearAll()">Reset filters</button>
+            {% if can_create %}<a class="btn btn-primary" x-show="!filtered" href="{% url 'web:supplier_pay' %}">{% icon "plus" 18 %} Pay supplier</a>{% endif %}
+          </div>
+        </template>
+
+        <nav class="pager" x-show="meta.count > 0" aria-label="Pages">
+          <span class="pager-info" x-text="`Showing ${from}–${to} of ${num(meta.count)}`"></span>
+          <div class="pager-btns" x-show="meta.total_pages > 1">
+            <button type="button" class="icon-btn" :disabled="page <= 1" @click="go(page - 1)" aria-label="Previous page">{% icon "chevron-left" 18 %}</button>
+            <template x-for="(p, i) in pages" :key="i + '-' + p">
+              <button type="button" class="pg" :class="{ 'is-on': p === page }" :disabled="p === '…'" @click="go(p)" x-text="p"></button>
+            </template>
+            <button type="button" class="icon-btn" :disabled="page >= meta.total_pages" @click="go(page + 1)" aria-label="Next page">{% icon "chevron-right" 18 %}</button>
+          </div>
+        </nav>
+      </div>
+    </template>
+  </section>
+
+  {# ───────────── voucher drawer ───────────── #}
+  <div class="drawer-wrap" x-show="sel" x-cloak x-transition.opacity.duration.150ms @click.self="shut()">
+    <aside class="drawer" role="dialog" aria-modal="true" aria-label="Payment voucher" x-show="sel"
+           x-transition:enter="drawer-in" x-transition:enter-start="drawer-from" x-transition:enter-end="drawer-to">
+      <template x-if="sel">
+        <div class="drawer-body">
+          <header class="drawer-head no-print">
+            <div>
+              <h2 x-text="sel.sp_no"></h2>
+              <span class="tag" :class="sel.status === 'cancelled' ? '' : 'tg-' + sel.payment_type" x-text="sel.status === 'cancelled' ? 'Cancelled' : typeLabel(sel.payment_type)"></span>
+            </div>
+            <div class="drawer-actions">
+              <template x-if="canCancel && sel.status === 'completed'">
+                <button type="button" class="icon-btn danger" @click="openCancel()" aria-label="Cancel this payment" title="Cancel payment">{% icon "trash" 18 %}</button>
+              </template>
+              <button type="button" class="btn btn-ghost" @click="print()">{% icon "printer" 18 %} <span>Print</span></button>
+              <button type="button" class="icon-btn" @click="shut()" aria-label="Close">{% icon "x" 18 %}</button>
+            </div>
+          </header>
+
+          <div class="void-note no-print" x-show="sel.status === 'cancelled'">
+            {% icon "info" 16 %}<span>This payment was cancelled. The money went back to the account and the invoices it paid are due again.</span>
+          </div>
+
+          <div class="invoice mr print-area" :class="{ 'is-void': sel.status === 'cancelled' }">
+            <div class="inv-top">
+              <div><b class="inv-co">{{ web_company.name }}</b><span x-text="sel.status === 'cancelled' ? 'Payment voucher (cancelled)' : 'Payment voucher'"></span></div>
+              <div class="inv-meta"><b x-text="sel.sp_no"></b><span x-text="date(sel.payment_date)"></span></div>
+            </div>
+            <div class="mr-from">
+              <span>Paid to</span>
+              <b x-text="sel.supplier_name"></b>
+              <small x-show="sel.supplier_phone" x-text="sel.supplier_phone"></small>
+            </div>
+            <div class="mr-amount">
+              <span>Amount</span>
+              <b x-text="taka(sel.amount)"></b>
+              <em x-text="words(sel.amount)"></em>
+            </div>
+            <dl class="mr-facts">
+              <div><dt>Applied to</dt><dd x-text="appliedTo(sel)"></dd></div>
+              <template x-if="sel.allocation_detail && (sel.allocation_detail.invoices.length > 1 || sel.allocation_detail.advance_added > 0 || sel.payment_type === 'overall')">
+                <div class="mr-alloc">
+                  <template x-for="a in sel.allocation_detail.invoices" :key="a.purchase_id">
+                    <p><span x-text="a.invoice_no"></span><b x-text="taka(a.amount)"></b></p>
+                  </template>
+                  <p x-show="sel.allocation_detail.advance_added > 0 && sel.payment_type !== 'advance'"><span>Kept as advance</span><b x-text="taka(sel.allocation_detail.advance_added)"></b></p>
+                </div>
+              </template>
+              <div x-show="Number(sel.advance_amount_used) > 0"><dt>From supplier advance</dt><dd x-text="taka(sel.advance_amount_used)"></dd></div>
+              <div><dt>Paid from</dt><dd x-text="paidFrom(sel)"></dd></div>
+              <div x-show="sel.reference_no"><dt>Reference</dt><dd x-text="sel.reference_no"></dd></div>
+              <div><dt>Prepared by</dt><dd x-text="sel.prepared_by_name || '—'"></dd></div>
+            </dl>
+            <p class="mr-note" x-show="sel.description" x-text="sel.description"></p>
+            <div class="mr-sign">
+              <div><span></span>Received by (supplier)</div>
+              <div><span></span>Authorised signature</div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </aside>
+  </div>
+
+  <div class="modal-wrap" x-show="confirmCancel" x-cloak x-transition.opacity.duration.120ms @click.self="confirmCancel = false" role="dialog" aria-modal="true">
+    <div class="modal">
+      <div class="modal-icon">{% icon "trash" 22 %}</div>
+      <h2>Cancel <span x-text="sel && sel.sp_no"></span>?</h2>
+      <p>Everything this payment did is reversed: the money goes back to <b x-text="sel && (sel.account_name || 'the account')"></b>,
+        and the invoices it paid become due again. The voucher stays in the list, marked cancelled.</p>
+      <label class="fld"><span class="fld-label">Reason <small>(optional)</small></span>
+        <input class="in" type="text" maxlength="200" x-model="cancelReason" placeholder="e.g. Paid to the wrong supplier"></label>
+      <p class="modal-err" x-show="cancelError" x-text="cancelError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="confirmCancel = false" :disabled="cancelling">Keep it</button>
+        <button type="button" class="btn btn-danger" @click="cancelPayment()" :disabled="cancelling" x-text="cancelling ? 'Cancelling…' : 'Cancel payment'"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" x-show="toast" x-cloak x-transition.opacity role="status" x-text="toast"></div>
+</div>
+{% endblock %}

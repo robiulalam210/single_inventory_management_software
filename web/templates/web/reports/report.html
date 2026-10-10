@@ -1,0 +1,154 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/reports.js' %}"></script>{% endblock %}
+{% block content %}
+<div x-data="reportPage('{{ key }}')">
+
+  <section class="panel filters no-print">
+    <p class="muted" x-text="cfg.note" style="margin:0 0 10px"></p>
+    <div class="f-row" x-show="cfg.dates">
+      <div class="seg seg-sm" role="tablist" aria-label="Period">
+        <template x-for="p in presets" :key="p.key">
+          <button type="button" :class="{ 'is-on': f.preset === p.key }" @click="setPreset(p.key)" x-text="p.label"></button>
+        </template>
+      </div>
+    </div>
+    <div class="f-row" x-show="cfg.dates && f.preset === 'custom'" x-cloak>
+      <label class="f-date"><span>From</span><input type="date" x-model="f.from" @change="applyCustom()"></label>
+      <label class="f-date"><span>To</span><input type="date" x-model="f.to" @change="applyCustom()"></label>
+    </div>
+    <div class="f-row" x-show="cfg.filters && cfg.filters.length">
+      <template x-for="flt in cfg.filters" :key="flt.key">
+        <div class="rp-pick">
+          <template x-if="flt.type === 'combo'">
+            <div class="rp-pick"><span x-text="flt.label"></span>{% include "web/_combo.html" with model="f[flt.key]" source="(opts[flt.key] || [])" placeholder="All" icon="search" %}</div>
+          </template>
+          <template x-if="flt.type === 'search'">
+            <label class="f-search">{% icon "search" 18 %}<input type="search" x-model="f[flt.key]" :placeholder="flt.placeholder" :aria-label="flt.placeholder"></label>
+          </template>
+          <template x-if="flt.type === 'number'">
+            <label class="rp-pick"><span x-text="flt.label"></span><input type="number" min="0" class="in rp-num" x-model="f[flt.key]"></label>
+          </template>
+          <template x-if="flt.type === 'chips'">
+            <div class="chips" role="radiogroup">
+              <template x-for="o in flt.options" :key="o[0]">
+                <button type="button" class="chip" role="radio" :aria-checked="(f[flt.key] === o[0]).toString()"
+                        :class="{ 'is-on': f[flt.key] === o[0] }" @click="f[flt.key] = o[0]" x-text="o[1]"></button>
+              </template>
+            </div>
+          </template>
+        </div>
+      </template>
+      <button type="button" class="btn-link" x-show="filtered" x-cloak @click="clearAll()">{% icon "filter-x" 16 %} Reset</button>
+    </div>
+    <div class="rp-bar" style="margin-top:10px" x-show="!needs">
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-ghost" @click="print()">{% icon "printer" 16 %} Print</button>
+      <button type="button" class="btn btn-ghost" x-show="cfg.cols" @click="exportCsv()" :disabled="exporting"><span x-text="exporting ? 'Exporting…' : 'Download CSV'"></span></button>
+    </div>
+  </section>
+
+  <template x-if="needs">
+    <section class="panel"><div class="empty">
+      <div class="tile">{% icon "users" 26 %}</div>
+      <h2 x-text="cfg.requireText"></h2>
+      <p>Use the picker above.</p>
+    </div></section>
+  </template>
+
+  <template x-if="!needs && error">
+    <section class="panel"><div class="empty">
+      <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+      <h2>Couldn't load this report</h2>
+      <p x-text="error"></p>
+      <button class="btn btn-ghost" @click="fetch()">Try again</button>
+    </div></section>
+  </template>
+
+  <div class="print-area" x-show="!needs && !error">
+    <div class="rp-head">
+      <h2>{{ web_company.name }}</h2>
+      <p><b x-text="cfg.title"></b><span x-show="subject"> — <span x-text="subject"></span></span> · <span x-text="periodText"></span></p>
+    </div>
+
+    <template x-if="cfg.kind === 'statement'">
+      <section class="panel" :class="{ 'is-loading': loading }" style="padding:18px 20px">
+        <template x-if="st">
+          <div class="rp-stmt">
+            <p><span>Sales</span><b x-text="taka(st.s.total_sales)"></b></p>
+            <p><span>Purchases</span><b x-text="taka(st.s.total_purchase)"></b></p>
+            <p class="is-total"><span>Gross profit</span><b :class="tone(st.s.gross_profit, 'sign')" x-text="taka(st.s.gross_profit)"></b></p>
+            <p><span>Expenses</span><b x-text="taka(st.s.total_expenses)"></b></p>
+            <template x-if="st.hasRet">
+              <div>
+                <p><span>Purchase returns (credit)</span><b x-text="taka(st.s.purchase_returns)"></b></p>
+                <p><span>Sales returns</span><b x-text="taka(st.s.sales_returns)"></b></p>
+              </div>
+            </template>
+            <p class="is-total"><span>Net profit</span><b :class="tone(st.s.net_profit, 'sign')" x-text="taka(st.s.net_profit)"></b></p>
+            <template x-if="(st.s.expense_breakdown || []).length">
+              <div>
+                <h3 class="rp-sec">Expenses by head</h3>
+                <template x-for="(e, i) in st.s.expense_breakdown" :key="i">
+                  <p class="is-sub"><span x-text="(e.head || e.expense_head__name || '—') + (e.subhead ? ' › ' + e.subhead : '')"></span><b x-text="taka(e.total)"></b></p>
+                </template>
+              </div>
+            </template>
+          </div>
+        </template>
+        <template x-if="!st && !loading"><div class="empty"><h2>No data for this period</h2></div></template>
+      </section>
+    </template>
+
+    <template x-if="cfg.kind !== 'statement'">
+      <div>
+        <div class="rp-cards" x-show="cfg.cards && summary">
+          <template x-for="c in (cfg.cards || [])" :key="c.k">
+            <div><span x-text="c.l"></span><b :class="tone(summary && summary[c.k], c.tone)" x-text="card(c)"></b></div>
+          </template>
+        </div>
+
+        <section class="panel">
+          <table class="dt" :class="{ 'is-loading': loading }">
+            <thead><tr>
+              <template x-for="c in cfg.cols" :key="c.k"><th :class="[c.num ? 'num' : '', c.hide ? 'hide-md' : '']" x-text="c.t"></th></template>
+            </tr></thead>
+            <tbody>
+              <template x-for="(r, i) in rows" :key="i">
+                <tr :class="cfg.rowClass ? cfg.rowClass(r) : ''">
+                  <template x-for="c in cfg.cols" :key="c.k">
+                    <td :class="[c.num ? 'num' : '', c.hide ? 'hide-md' : '', tone(r[c.k], c.tone)]" :data-k="c.t">
+                      <b x-show="c.bold" x-text="cell(r, c)"></b><span x-show="!c.bold" x-text="cell(r, c)"></span>
+                    </td>
+                  </template>
+                </tr>
+              </template>
+              <template x-for="i in (loading && !rows.length ? 6 : 0)" :key="'sk' + i">
+                <tr class="sk-row"><td :colspan="cfg.cols.length"><span class="sk-line"></span></td></tr>
+              </template>
+            </tbody>
+          </table>
+          <template x-if="!loading && !rows.length">
+            <div class="empty">
+              <div class="tile">{% icon "chart" 26 %}</div>
+              <h2>Nothing to show</h2>
+              <p>No records match this period and these filters.</p>
+              <button class="btn btn-ghost" x-show="filtered" @click="clearAll()">Reset filters</button>
+            </div>
+          </template>
+          <nav class="pager no-print" x-show="cfg.paged && meta.count > 0" aria-label="Pages">
+            <span class="pager-info" x-text="`Showing ${from}–${to} of ${int(meta.count)}`"></span>
+            <div class="pager-btns" x-show="meta.total_pages > 1">
+              <button type="button" class="icon-btn" :disabled="page <= 1" @click="go(page - 1)" aria-label="Previous page">{% icon "chevron-left" 18 %}</button>
+              <template x-for="(p, i) in pages" :key="i + '-' + p">
+                <button type="button" class="pg" :class="{ 'is-on': p === page }" :disabled="p === '…'" @click="go(p)" x-text="p"></button>
+              </template>
+              <button type="button" class="icon-btn" :disabled="page >= meta.total_pages" @click="go(page + 1)" aria-label="Next page">{% icon "chevron-right" 18 %}</button>
+            </div>
+          </nav>
+        </section>
+      </div>
+    </template>
+  </div>
+</div>
+{% endblock %}

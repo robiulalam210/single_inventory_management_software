@@ -1,0 +1,214 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/sell.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  <span class="pos-keys" aria-hidden="true"><kbd>F2</kbd> search <kbd>F9</kbd> charge</span>
+  <a class="btn btn-ghost top-act" href="{% url 'web:sale_new' %}">{% icon "receipt" 18 %}<span>Full sale form</span></a>
+{% endblock %}
+{% block content %}
+{{ sell_init|json_script:"sell-init" }}
+<div class="pos" x-data="posScreen(JSON.parse(document.getElementById('sell-init').textContent))">
+
+  {# ───────────── catalog ───────────── #}
+  <section class="panel pos-cat">
+    <div class="pos-search">
+      {% icon "search" 18 %}
+      <input x-ref="q" type="search" x-model="q" @keydown.enter.prevent="searchEnter()" autocomplete="off"
+             placeholder="Search name or SKU, or scan a barcode" aria-label="Search products">
+    </div>
+    <div class="pos-cats" role="tablist" aria-label="Category">
+      <button type="button" class="chip" :class="{ 'is-on': !cat }" @click="cat = ''">All <span x-text="catalog.length"></span></button>
+      <template x-for="c in cats" :key="c.name">
+        <button type="button" class="chip" :class="{ 'is-on': cat === c.name }" @click="cat = cat === c.name ? '' : c.name"><span x-text="c.name"></span> <span x-text="c.count"></span></button>
+      </template>
+    </div>
+
+    <div class="pos-grid" role="list">
+      <template x-for="p in shown" :key="p.id">
+        <button type="button" class="tile" role="listitem" @click="tap(p)" :class="{ 'is-out': p.stock <= 0, 'is-in': inCart(p) > 0 }"
+                :aria-label="p.name + ', ' + taka(p.price) + (p.stock <= 0 ? ', out of stock' : '')">
+          <span class="tile-qty" x-show="inCart(p) > 0" x-text="num(inCart(p))"></span>
+          <span class="tile-av" :style="'--h:' + ((p.cat.charCodeAt(0) * 37) % 360)" x-text="p.name.slice(0, 1).toUpperCase()"></span>
+          <b class="tile-name" x-text="p.name"></b>
+          <span class="tile-sku" x-text="p.sku"></span>
+          <span class="tile-foot">
+            <b x-text="taka(p.price)"></b>
+            <small :class="p.stock <= 0 ? 'out' : (p.alert && p.stock <= p.alert ? 'low' : '')"
+                   x-text="p.stock <= 0 ? 'Out' : num(p.stock) + ' left'"></small>
+          </span>
+        </button>
+      </template>
+      <template x-for="i in (catLoading ? 12 : 0)" :key="'sk' + i"><div class="tile tile-sk"><span class="sk-line"></span><span class="sk-line" style="width:60%"></span></div></template>
+    </div>
+    <div class="empty pos-empty" x-show="!catLoading && !shown.length" x-cloak>
+      <div class="tile-icon">{% icon "box" 24 %}</div>
+      <h2 x-text="catalog.length ? 'No product matches' : 'No products yet'"></h2>
+      <p x-text="catError || (catalog.length ? 'Try another name or clear the category.' : 'Add products first, then sell them here.')"></p>
+    </div>
+  </section>
+
+  {# ───────────── cart ───────────── #}
+  <aside class="panel pos-cart" aria-label="Current sale">
+    <div class="cart-head">
+      <h3>Current sale <span x-show="rows.length" x-text="'(' + rows.length + ')'"></span></h3>
+      <button type="button" class="btn-link" x-show="rows.length" x-cloak @click="clearCart()">Clear</button>
+    </div>
+
+    <div class="cart-cust" :class="{ 'has-error': errors.customer }">
+      <div class="seg seg-fill" role="radiogroup" aria-label="Customer type">
+        <button type="button" :class="{ 'is-on': cust.mode === 'walk_in' }" @click="cust.mode = 'walk_in'">Walk-in</button>
+        <button type="button" :class="{ 'is-on': cust.mode === 'saved' }" @click="cust.mode = 'saved'">Customer</button>
+      </div>
+      <div x-show="cust.mode === 'saved'" x-cloak style="margin-top:8px">
+        {% include "web/_combo.html" with model="cust.id" source="customers" placeholder="Search customer" icon="users" %}
+      </div>
+      <p class="fld-err" x-show="errors.customer" x-text="errors.customer"></p>
+    </div>
+
+    <ul class="cart-lines">
+      <template x-for="r in rows" :key="r.key">
+        <li :class="{ 'row-err': r.err, 'is-open': r.open }">
+          <div class="cl-main" @click="r.open = !r.open">
+            <b x-text="r.name"></b>
+            <span x-text="taka(r.price) + (Number(r.discount) > 0 ? ' · ' + (r.discount_type === 'percent' ? r.discount + '% off' : taka(r.discount) + ' off') : '')"></span>
+          </div>
+          <div class="cl-qty">
+            <button type="button" @click="bump(r, -1)" :aria-label="'One less ' + r.name">−</button>
+            <input type="text" inputmode="decimal" x-model="r.qty" @input="r.qty = r.qty.replace(/[^0-9.]/g, ''); r.err = stockErr(r)" :aria-label="'Quantity of ' + r.name">
+            <button type="button" @click="bump(r, 1)" :aria-label="'One more ' + r.name">+</button>
+          </div>
+          <b class="cl-amt" x-text="taka(lineOf(r))"></b>
+          <div class="cl-edit" x-show="r.open" x-cloak>
+            <label><span>Price</span><input class="in num" type="text" inputmode="decimal" x-model="r.price" @input="r.price = r.price.replace(/[^0-9.]/g, ''); r.err = stockErr(r)"></label>
+            <label><span>Discount</span>
+              <span class="in-unit"><input class="in num" type="text" inputmode="decimal" placeholder="0" x-model="r.discount" @input="r.discount = r.discount.replace(/[^0-9.]/g, '')">
+                <button type="button" class="unit-tg" @click="r.discount_type = r.discount_type === 'fixed' ? 'percent' : 'fixed'" x-text="r.discount_type === 'fixed' ? '৳' : '%'"></button></span></label>
+            <button type="button" class="btn-link danger-link" @click="remove(r)">{% icon "trash" 15 %} Remove</button>
+          </div>
+          <p class="po-err" x-show="r.err" x-text="r.err"></p>
+        </li>
+      </template>
+      <li class="cart-empty" x-show="!rows.length">
+        {% icon "cart" 28 %}
+        <span>Tap a product or scan a barcode to start.</span>
+      </li>
+    </ul>
+
+    <div class="cart-foot">
+      <button type="button" class="cart-ch-toggle" @click="chargesOpen = !chargesOpen" :aria-expanded="chargesOpen.toString()">
+        <span>Discount, VAT &amp; charges</span>
+        <span x-text="(t.discount || t.vat || t.service || t.delivery) ? 'Added' : 'None'"></span>
+        {% icon "chevron-down" 16 %}
+      </button>
+      <div class="cart-ch" x-show="chargesOpen" x-cloak>
+        <template x-for="c in [ { k: 'discount', label: 'Discount' }, { k: 'vat', label: 'VAT' }, { k: 'service', label: 'Service' }, { k: 'delivery', label: 'Delivery' } ]" :key="c.k">
+          <label><span x-text="c.label"></span>
+            <span class="in-unit"><input class="in num" type="text" inputmode="decimal" placeholder="0" x-model="ch[c.k]" @input="ch[c.k] = ch[c.k].replace(/[^0-9.]/g, '')">
+              <button type="button" class="unit-tg" @click="ch[c.k + '_type'] = ch[c.k + '_type'] === 'fixed' ? 'percent' : 'fixed'" x-text="ch[c.k + '_type'] === 'fixed' ? '৳' : '%'"></button></span></label>
+        </template>
+      </div>
+      <dl class="cart-sum">
+        <div><dt>Subtotal</dt><dd x-text="taka(t.sub)"></dd></div>
+        <div x-show="t.discount"><dt>Discount</dt><dd x-text="'− ' + taka(t.discount)"></dd></div>
+        <div x-show="t.vat + t.service + t.delivery"><dt>VAT &amp; charges</dt><dd x-text="taka(round2(t.vat + t.service + t.delivery))"></dd></div>
+      </dl>
+      <button type="button" class="btn btn-primary pos-charge" @click="openPay()" :disabled="!rows.length">
+        <span>Charge</span><b x-text="taka(t.grand)"></b>
+      </button>
+    </div>
+  </aside>
+
+  {# ───────────── payment ───────────── #}
+  <div class="modal-wrap" x-show="payOpen" x-cloak x-transition.opacity.duration.120ms @click.self="payOpen = false"
+       @keydown.escape.window="payOpen && (payOpen = false)" role="dialog" aria-modal="true" aria-labelledby="pay-title">
+    <form class="modal pay-modal" @submit.prevent="complete()" @keydown.enter.prevent="!saving && complete()">
+      <div class="pay-total"><span id="pay-title">Amount to pay</span><b x-text="taka(t.grand)"></b>
+        <small x-text="customer ? customer.name : 'Walk-in customer'"></small></div>
+
+      <div class="fld" :class="{ 'has-error': errors.received }">
+        <label class="fld-label" for="pay-recv">Cash received</label>
+        <div class="money-in money-xl"><span>৳</span>
+          <input id="pay-recv" x-ref="recv" type="text" inputmode="decimal" x-model="pay.received"
+                 @input="errors.received = ''; pay.received = pay.received.replace(/[^0-9.,]/g, '')"></div>
+        <div class="quick">
+          <template x-for="v in quickCash()" :key="v">
+            <button type="button" class="chip" @click="pay.received = v.toFixed(2); errors.received = ''" x-text="v === t.grand ? 'Exact' : taka(v)"></button>
+          </template>
+          <button type="button" class="chip" x-show="cust.mode === 'saved'" @click="pay.received = '0'">On credit</button>
+        </div>
+        <p class="fld-err" x-show="errors.received" x-text="errors.received"></p>
+      </div>
+
+      <div class="pay-result" :class="change > 0 ? 'is-change' : (due > 0 ? 'is-due' : 'is-exact')">
+        <span x-text="change > 0 ? 'Give back' : (due > 0 ? 'Left as due' : 'Exact amount')"></span>
+        <b x-text="taka(change > 0 ? change : due)"></b>
+      </div>
+
+      <div class="fld" x-show="receivedNum > 0">
+        <div class="seg seg-fill" role="radiogroup" aria-label="Payment method">
+          <template x-for="m in methods" :key="m.value">
+            <button type="button" :class="{ 'is-on': pay.method === m.value }" @click="pay.method = m.value; errors.account = ''" x-text="m.label"></button>
+          </template>
+        </div>
+        <div style="margin-top:8px" :class="{ 'has-error': errors.account }">
+          {% include "web/_combo.html" with model="pay.account" source="accounts" placeholder="Into account" icon="wallet" noclear=1 %}
+          <p class="fld-err" x-show="errors.account" x-text="errors.account"></p>
+        </div>
+      </div>
+
+      <p class="form-err" x-show="serverError" x-cloak role="alert">{% icon "alert" 16 %}<span x-text="serverError"></span></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="payOpen = false" :disabled="saving">Back</button>
+        <button type="submit" class="btn btn-primary" :disabled="saving" x-text="saving ? 'Saving…' : 'Complete sale'"></button>
+      </div>
+    </form>
+  </div>
+
+  {# ───────────── receipt (80mm) ───────────── #}
+  <div class="modal-wrap" x-show="receiptOpen" x-cloak x-transition.opacity.duration.120ms role="dialog" aria-modal="true" aria-label="Receipt"
+       @keydown.escape.window="receiptOpen && newSale()" @keydown.enter.window="receiptOpen && newSale()">
+    <div class="modal receipt-modal">
+      <div class="rc-done no-print">{% icon "check-circle" 20 %}<span>Sale saved</span>
+        <b x-show="done && Number(done.change_amount) > 0" x-text="done && ('Give back ' + taka(done.change_amount))"></b></div>
+      <template x-if="done">
+        <div class="thermal print-area">
+          <div class="th-head">
+            <b x-text="company.name"></b>
+            <span x-show="company.address" x-text="company.address"></span>
+            <span x-show="company.phone" x-text="company.phone"></span>
+          </div>
+          <div class="th-meta">
+            <span x-text="done.invoice_no"></span><span x-text="fmtDate(done.sale_date) + ' ' + fmtTime(done.sale_date)"></span>
+          </div>
+          <div class="th-meta"><span x-text="done.customer_name || 'Walk-in customer'"></span><span x-text="'By ' + (done.sale_by_name || '')"></span></div>
+          <table class="th-items">
+            <template x-for="it in done.items" :key="it.id">
+              <tbody>
+                <tr><td colspan="2" x-text="it.product_name"></td></tr>
+                <tr class="th-sub"><td x-text="num(it.base_quantity) + ' × ' + taka(it.unit_price) + (Number(it.discount) > 0 ? ' − ' + (it.discount_type === 'percent' ? it.discount + '%' : taka(it.discount)) : '')"></td>
+                  <td class="num" x-text="taka(it.subtotal)"></td></tr>
+              </tbody>
+            </template>
+          </table>
+          <dl class="th-tot">
+            <template x-for="ln in saleLines(done)" :key="ln[0]">
+              <div><dt x-text="ln[0]"></dt><dd x-text="ln[1] < 0 ? '− ' + taka(-ln[1]) : taka(ln[1])"></dd></div>
+            </template>
+            <div class="th-grand"><dt>TOTAL</dt><dd x-text="taka(done.grand_total)"></dd></div>
+            <div><dt>Received</dt><dd x-text="taka(Number(done.tendered_amount) || Number(done.paid_amount))"></dd></div>
+            <div x-show="Number(done.change_amount) > 0"><dt>Change</dt><dd x-text="taka(done.change_amount)"></dd></div>
+            <div x-show="Number(done.due_amount) > 0"><dt>Due</dt><dd x-text="taka(done.due_amount)"></dd></div>
+          </dl>
+          <p class="th-foot">Thank you for shopping with us</p>
+        </div>
+      </template>
+      <div class="modal-actions no-print">
+        <button type="button" class="btn btn-ghost" @click="printReceipt()">{% icon "printer" 18 %} Print</button>
+        <button type="button" class="btn btn-primary" @click="newSale()">New sale <kbd>Enter</kbd></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="pos-flash" x-show="flashMsg" x-cloak x-transition.opacity role="status" x-text="flashMsg"></div>
+</div>
+{% endblock %}

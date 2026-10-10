@@ -1,0 +1,10 @@
+{% extends "web/base.html" %}
+{% load web_tags %}
+{% block content %}
+<section class="panel empty">
+  <div class="tile">{% icon section_icon 28 %}</div>
+  <h2>{{ page_title }} is coming to the web</h2>
+  <p>This screen already works in the desktop and mobile app. It will appear here soon, with the same data and the same permissions.</p>
+  <a class="btn btn-ghost" href="{% url 'web:home' %}">Back to dashboard</a>
+</section>
+{% endblock %}

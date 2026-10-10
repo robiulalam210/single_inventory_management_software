@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}Admin – Inventory Management System{% endblock %}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f6f8fa;
+            margin: 0;
+            padding: 0;
+        }
+        .sidebar {
+            position: fixed;
+            width: 200px;
+            height: 100%;
+            background: #1a73e8;
+            color: #fff;
+            padding-top: 40px;
+            top: 0;
+            left: 0;
+        }
+        .sidebar a, .sidebar .sidebar-section {
+            display: block;
+            color: #fff;
+            padding: 16px 24px;
+            text-decoration: none;
+            font-weight: bold;
+            transition: background .2s;
+        }
+        .sidebar a:hover, .sidebar .active {
+            background: #155ab6;
+        }
+        .sidebar .sidebar-section {
+            cursor: default;
+            background: transparent;
+            font-weight: bold;
+            font-size: 1.1em;
+            margin-top: 12px;
+        }
+        .sidebar .sidebar-sub {
+            padding-left: 40px;
+            font-weight: normal;
+            font-size: 0.97em;
+        }
+        .container {
+            margin-left: 220px;
+            padding: 40px 24px;
+            max-width: 700px;
+        }
+        .logout {
+            background: #c0392b !important;
+        }
+        .logout:hover {
+            background: #a93226 !important;
+        }
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <div class="sidebar">
+        <a href="{% url 'admin_dashboard' %}" class="{% block dashboard_active %}{% endblock %}">Dashboard</a>
+        <div class="sidebar-section">Users</div>
+        <a href="{% url 'user_list' %}" class="sidebar-sub">User List</a>
+        <a href="{% url 'create_user' %}" class="sidebar-sub">Create User</a>
+        {# Uncomment the next two lines if you have these URL names! #}
+        {# <a href="{% url 'customer_list' %}">Customers</a> #}
+        {# <a href="{% url 'branch_list' %}">Warehouse Branches</a> #}
+        <a href="/admin/logout/" class="logout">Logout</a>
+    </div>
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>

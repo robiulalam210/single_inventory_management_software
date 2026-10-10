@@ -1,0 +1,118 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/transfers.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  {% if form_init.canSeeList %}<a class="btn btn-ghost top-act" href="{% url 'web:transfers' %}">{% icon "transfer" 18 %}<span>Transfer list</span></a>{% endif %}
+{% endblock %}
+{% block content %}
+{{ form_init|json_script:"tf-init" }}
+<div x-data="transferForm(JSON.parse(document.getElementById('tf-init').textContent))">
+
+  <template x-if="done">
+    <section class="panel mr-done">
+      <div class="mr-done-ic">{% icon "check" 28 %}</div>
+      <h2 x-text="done.quick ? 'Transfer completed' : 'Transfer created'"></h2>
+      <p class="mr-done-amt" x-text="taka(done.amount)"></p>
+      <p class="mr-done-sub"><b x-text="done.from"></b> to <b x-text="done.to"></b><span x-show="done.no"> · <span x-text="done.no"></span></span></p>
+      <p class="mr-done-sub" x-show="!done.quick">It is pending. No money has moved yet. Execute it from the transfer list.</p>
+      <div class="mr-done-actions">
+        <template x-if="canSeeList"><a class="btn btn-ghost" href="{% url 'web:transfers' %}?saved=1">View transfers</a></template>
+        <button type="button" class="btn btn-primary" @click="again()">{% icon "plus" 18 %} New transfer</button>
+      </div>
+    </section>
+  </template>
+
+  <form x-show="!done" class="mr-grid" @submit.prevent="save()" novalidate>
+    <section class="panel mr-form">
+
+      <div class="fgroup">
+        <div class="fgroup-head"><span class="step">1</span><h3>Move money between accounts</h3></div>
+        <div class="fld-row">
+          <div class="fld" :class="{ 'has-error': errors.from }">
+            <label class="fld-label">From account <i>*</i></label>
+            {% include "web/_combo.html" with model="form.from" source="fromOptions" placeholder="Choose account" icon="wallet" noclear=1 %}
+            <p class="tr-bal" :class="{ 'is-short': short }" x-show="fromAcc">Balance <b x-text="taka(fromAcc && fromAcc.balance)"></b></p>
+            <p class="fld-err" x-show="errors.from" x-text="errors.from"></p>
+          </div>
+          <div class="fld" :class="{ 'has-error': errors.to }">
+            <label class="fld-label">To account <i>*</i></label>
+            {% include "web/_combo.html" with model="form.to" source="toOptions" placeholder="Choose account" icon="wallet" noclear=1 %}
+            <p class="tr-bal" x-show="toAcc">Balance <b x-text="taka(toAcc && toAcc.balance)"></b></p>
+            <p class="fld-err" x-show="errors.to" x-text="errors.to"></p>
+          </div>
+        </div>
+        <p class="fld-hint" x-show="loading">Loading accounts…</p>
+      </div>
+
+      <div class="fgroup">
+        <div class="fgroup-head"><span class="step">2</span><h3>Amount and details</h3></div>
+        <div class="fld-row">
+          <div class="fld" :class="{ 'has-error': errors.amount }">
+            <label class="fld-label" for="tf-amount">Amount <i>*</i></label>
+            <div class="money-in">
+              <span>৳</span>
+              <input id="tf-amount" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00"
+                     x-model="form.amount" @input="errors.amount = ''; form.amount = form.amount.replace(/[^0-9.,]/g, '')">
+            </div>
+            <div class="quick" x-show="fromAcc && Number(fromAcc.balance) > 0">
+              <button type="button" class="chip" @click="fill(fromAcc.balance)">All balance <span x-text="taka(fromAcc && fromAcc.balance)"></span></button>
+            </div>
+            <p class="fld-err" x-show="errors.amount" x-text="errors.amount"></p>
+            <p class="fld-hint" x-show="amountNum > 0 && !errors.amount" x-text="words(amountNum)"></p>
+          </div>
+          <div class="fld" :class="{ 'has-error': errors.date }">
+            <label class="fld-label" for="tf-date">Transfer date <i>*</i></label>
+            <input id="tf-date" class="in" type="date" x-model="form.date" :max="maxDate" @change="errors.date = ''">
+            <p class="fld-err" x-show="errors.date" x-text="errors.date"></p>
+          </div>
+        </div>
+
+        <div class="fld">
+          <label class="fld-label">Transfer type</label>
+          <div class="seg seg-fill" role="radiogroup" aria-label="Transfer type">
+            <template x-for="t in types" :key="t.value">
+              <button type="button" role="radio" :aria-checked="(form.type === t.value).toString()"
+                      :class="{ 'is-on': form.type === t.value }" @click="form.type = t.value" x-text="t.label"></button>
+            </template>
+          </div>
+        </div>
+
+        <div class="fld-row">
+          <div class="fld">
+            <label class="fld-label" for="tf-ref">Reference no. <small>(optional)</small></label>
+            <input id="tf-ref" class="in" type="text" maxlength="100" x-model="form.ref" placeholder="Cheque or slip number">
+          </div>
+          <div class="fld">
+            <label class="fld-label" for="tf-desc">Description <small>(optional)</small></label>
+            <input id="tf-desc" class="in" type="text" maxlength="200" x-model="form.description" placeholder="What is this transfer for?">
+          </div>
+        </div>
+        <div class="fld">
+          <label class="fld-label" for="tf-rem">Remarks <small>(optional)</small></label>
+          <textarea id="tf-rem" class="in" rows="2" maxlength="500" x-model="form.remarks"></textarea>
+        </div>
+
+        <label class="check"><input type="checkbox" x-model="form.quick"><span>Quick transfer: move the money right now (otherwise it stays pending until you execute it)</span></label>
+      </div>
+    </section>
+
+    <aside class="panel mr-side">
+      <h3>Transfer preview</h3>
+      <div class="mr-side-amt">
+        <span>Moving</span>
+        <b x-text="taka(amountNum)"></b>
+        <small x-text="fromAcc && toAcc ? fromAcc.name + ' to ' + toAcc.name : 'Choose both accounts to begin'"></small>
+      </div>
+      <div class="rt-sum" style="max-width:none" x-show="fromAcc && toAcc && amountNum > 0">
+        <p><span x-text="fromAcc && fromAcc.name"></span><b :class="{ 'txt-due': afterFrom < 0 }" x-text="taka(afterFrom)"></b></p>
+        <p><span x-text="toAcc && toAcc.name"></span><b x-text="taka(afterTo)"></b></p>
+        <p class="fld-hint" x-show="!form.quick">Balances change when the transfer is executed.</p>
+      </div>
+      <p class="form-err" x-show="serverError" x-cloak role="alert">{% icon "alert" 16 %}<span x-text="serverError"></span></p>
+      <button type="submit" class="btn btn-primary btn-block" :disabled="saving">
+        <span x-text="saving ? 'Saving…' : (form.quick ? 'Transfer now' : 'Create transfer')"></span>
+      </button>
+    </aside>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,232 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/receipts.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  {% if can_create %}<a class="btn btn-primary top-act" href="{% url 'web:receipt_new' %}">{% icon "plus" 18 %}<span>New receipt</span></a>{% endif %}
+{% endblock %}
+{% block content %}
+<div x-data="receiptList({ canSeeUsers: {{ can_see_users|yesno:'true,false' }}, canDelete: {{ can_delete|yesno:'true,false' }} })"
+     @keydown.escape.window="confirmDel ? (confirmDel = false) : shut()">
+
+  {# ───────────── filters ───────────── #}
+  <section class="panel filters">
+    <div class="f-row">
+      <label class="f-search">
+        {% icon "search" 18 %}
+        <input type="search" x-model="f.q" placeholder="Search receipt no., customer, phone or invoice" aria-label="Search receipts">
+      </label>
+      <div class="seg seg-sm" role="tablist" aria-label="Period">
+        <template x-for="p in presets" :key="p.key">
+          <button type="button" :class="{ 'is-on': f.preset === p.key }" @click="setPreset(p.key)" x-text="p.label"></button>
+        </template>
+      </div>
+    </div>
+
+    <div class="f-row" x-show="f.preset === 'custom'" x-cloak>
+      <label class="f-date"><span>From</span><input type="date" x-model="f.from" @change="applyCustom()"></label>
+      <label class="f-date"><span>To</span><input type="date" x-model="f.to" @change="applyCustom()"></label>
+    </div>
+
+    <div class="f-row">
+      <div class="chips" role="radiogroup" aria-label="Receipt type">
+        <template x-for="t in types" :key="t.key">
+          <button type="button" class="chip" role="radio" :aria-checked="(f.type === t.key).toString()"
+                  :class="{ 'is-on': f.type === t.key }" @click="f.type = t.key" x-text="t.label"></button>
+        </template>
+      </div>
+      <div class="f-combos">
+        {% include "web/_combo.html" with model="f.customer" source="customers" placeholder="All customers" icon="users" %}
+        {% include "web/_combo.html" with model="f.method" source="methods" placeholder="All methods" icon="wallet" %}
+        <template x-if="canSeeUsers">
+          <div>{% include "web/_combo.html" with model="f.seller" source="sellers" placeholder="Anyone collected" icon="user" %}</div>
+        </template>
+        <button type="button" class="btn-link" x-show="filtered" x-cloak @click="clearAll()">{% icon "filter-x" 16 %} Reset</button>
+      </div>
+    </div>
+  </section>
+
+  {# ───────────── totals for this filter ───────────── #}
+  <div class="sumbar" aria-live="polite">
+    <div><span>Receipts</span><b x-text="sum ? num(sum.total_receipts) : '—'"></b></div>
+    <div><span>Collected</span><b class="txt-ok" x-text="sum ? taka(sum.total_amount) : '—'"></b></div>
+    <div><span>For one invoice</span><b x-text="sum ? taka(typeAmount('specific')) : '—'"></b></div>
+    <div><span>Toward dues &amp; advance</span><b x-text="sum ? taka(typeAmount('overall') + typeAmount('advance')) : '—'"></b></div>
+    <div class="sum-period"><span>Period</span><b x-text="periodText"></b></div>
+  </div>
+
+  {# ───────────── list ───────────── #}
+  <section class="panel">
+    <template x-if="error">
+      <div class="empty">
+        <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2>Couldn't load receipts</h2>
+        <p x-text="error"></p>
+        <button class="btn btn-ghost" @click="fetch()">Try again</button>
+      </div>
+    </template>
+
+    <template x-if="!error">
+      <div>
+        <table class="dt" :class="{ 'is-loading': loading }">
+          <thead>
+            <tr>
+              <th>Receipt</th>
+              <th>Received from</th>
+              <th>Applied to</th>
+              <th class="hide-md">Method</th>
+              <th class="hide-md">Collected by</th>
+              <th class="num">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in rows" :key="r.id">
+              <tr tabindex="0" @click="open(r)" @keydown.enter="open(r)" :aria-label="'Open receipt ' + r.mr_no">
+                <td data-k="Receipt">
+                  <b class="inv" x-text="r.mr_no"></b>
+                  <span class="sub" x-text="date(r.payment_date) + ', ' + time(r.payment_date)"></span>
+                </td>
+                <td data-k="Customer">
+                  <b x-text="customerName(r)"></b>
+                  <span class="sub" x-text="r.customer_phone || ''" x-show="r.customer_phone"></span>
+                </td>
+                <td data-k="Applied">
+                  <span class="tag" :class="'tg-' + r.payment_type" x-text="appliedTo(r)"></span>
+                </td>
+                <td class="hide-md" data-k="Method">
+                  <span x-text="r.payment_method || '—'"></span>
+                  <span class="sub" x-show="r.account_name && !same(r.account_name, r.payment_method)" x-text="r.account_name"></span>
+                </td>
+                <td class="hide-md" data-k="Collected by" x-text="r.seller_name || '—'"></td>
+                <td class="num" data-k="Amount"><b x-text="taka(r.amount)"></b></td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !rows.length ? 6 : 0)" :key="'sk' + i">
+              <tr class="sk-row"><td colspan="6"><span class="sk-line"></span></td></tr>
+            </template>
+          </tbody>
+        </table>
+
+        <template x-if="!loading && !rows.length">
+          <div class="empty">
+            <div class="tile">{% icon "receipt" 26 %}</div>
+            <h2 x-text="filtered ? 'No receipts match these filters' : 'No receipts this month yet'"></h2>
+            <p x-text="filtered ? 'Try a wider date range or clear the filters.' : 'Money you collect from customers will appear here.'"></p>
+            <button class="btn btn-ghost" x-show="filtered" @click="clearAll()">Reset filters</button>
+            {% if can_create %}<a class="btn btn-primary" x-show="!filtered" href="{% url 'web:receipt_new' %}">{% icon "plus" 18 %} New receipt</a>{% endif %}
+          </div>
+        </template>
+
+        <nav class="pager" x-show="meta.count > 0" aria-label="Pages">
+          <span class="pager-info" x-text="`Showing ${from}–${to} of ${num(meta.count)}`"></span>
+          <div class="pager-btns" x-show="meta.total_pages > 1">
+            <button type="button" class="icon-btn" :disabled="page <= 1" @click="go(page - 1)" aria-label="Previous page">{% icon "chevron-left" 18 %}</button>
+            <template x-for="(p, i) in pages" :key="i + '-' + p">
+              <button type="button" class="pg" :class="{ 'is-on': p === page }" :disabled="p === '…'" @click="go(p)" x-text="p"
+                      :aria-current="p === page ? 'page' : null"></button>
+            </template>
+            <button type="button" class="icon-btn" :disabled="page >= meta.total_pages" @click="go(page + 1)" aria-label="Next page">{% icon "chevron-right" 18 %}</button>
+          </div>
+        </nav>
+      </div>
+    </template>
+  </section>
+
+  {# ───────────── receipt drawer ───────────── #}
+  <div class="drawer-wrap" x-show="sel" x-cloak x-transition.opacity.duration.150ms @click.self="shut()">
+    <aside class="drawer" role="dialog" aria-modal="true" aria-label="Money receipt" x-show="sel"
+           x-transition:enter="drawer-in" x-transition:enter-start="drawer-from" x-transition:enter-end="drawer-to">
+      <template x-if="sel">
+        <div class="drawer-body">
+          <header class="drawer-head no-print">
+            <div>
+              <h2 x-text="sel.mr_no"></h2>
+              <span class="tag" :class="'tg-' + sel.payment_type" x-text="typeLabel(sel.payment_type)"></span>
+            </div>
+            <div class="drawer-actions">
+              <template x-if="canDelete">
+                <button type="button" class="icon-btn danger" @click="confirmDel = true" aria-label="Cancel this receipt" title="Cancel receipt">{% icon "trash" 18 %}</button>
+              </template>
+              <button type="button" class="btn btn-ghost" @click="print()">{% icon "printer" 18 %} <span>Print</span></button>
+              <button type="button" class="icon-btn" @click="shut()" aria-label="Close">{% icon "x" 18 %}</button>
+            </div>
+          </header>
+
+          {# এই অংশটাই print হয় #}
+          <div class="invoice mr print-area">
+            <div class="inv-top">
+              <div>
+                <b class="inv-co">{{ web_company.name }}</b>
+                <span>Money receipt</span>
+              </div>
+              <div class="inv-meta">
+                <b x-text="sel.mr_no"></b>
+                <span x-text="date(sel.payment_date) + ', ' + time(sel.payment_date)"></span>
+              </div>
+            </div>
+
+            <div class="mr-from">
+              <span>Received with thanks from</span>
+              <b x-text="customerName(sel)"></b>
+              <small x-show="sel.customer_phone" x-text="sel.customer_phone"></small>
+            </div>
+
+            <div class="mr-amount">
+              <span>Amount</span>
+              <b x-text="taka(sel.amount)"></b>
+              <em x-text="words(sel.amount)"></em>
+            </div>
+
+            <dl class="mr-facts">
+              <div><dt>Applied to</dt><dd x-text="appliedTo(sel)"></dd></div>
+              <template x-if="sel.allocation_detail && (sel.allocation_detail.invoices.length > 1 || sel.allocation_detail.advance > 0 || sel.payment_type !== 'specific')">
+                <div class="mr-alloc">
+                  <template x-for="a in sel.allocation_detail.invoices" :key="a.sale_id">
+                    <p><span x-text="a.invoice_no"></span><b x-text="taka(a.amount)"></b></p>
+                  </template>
+                  <p x-show="sel.allocation_detail.advance > 0"><span>Kept as advance</span><b x-text="taka(sel.allocation_detail.advance)"></b></p>
+                </div>
+              </template>
+              <div><dt>Payment method</dt><dd x-text="payWith(sel)"></dd></div>
+              <div><dt>Collected by</dt><dd x-text="sel.seller_name || '—'"></dd></div>
+              <template x-if="sel.payment_type === 'specific' && sel.payment_summary && sel.payment_summary.after_payment">
+                <div><dt>Invoice balance now</dt>
+                  <dd :class="{ 'txt-due': Number(sel.payment_summary.after_payment.current_due) > 0 }"
+                      x-text="Number(sel.payment_summary.after_payment.current_due) > 0 ? taka(sel.payment_summary.after_payment.current_due) + ' due' : 'Fully paid'"></dd></div>
+              </template>
+            </dl>
+
+            <p class="mr-note" x-show="sel.remark" x-text="sel.remark"></p>
+
+            <div class="mr-sign">
+              <div><span></span>Customer signature</div>
+              <div><span></span>Authorised signature</div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </aside>
+  </div>
+
+  {# ───────────── cancel (delete) confirm ───────────── #}
+  <div class="modal-wrap" x-show="confirmDel" x-cloak x-transition.opacity.duration.120ms @click.self="confirmDel = false"
+       role="dialog" aria-modal="true" aria-labelledby="del-title">
+    <div class="modal">
+      <div class="modal-icon">{% icon "trash" 22 %}</div>
+      <h2 id="del-title">Cancel <span x-text="sel && sel.mr_no"></span>?</h2>
+      <p>Everything this receipt did is reversed: the
+        <b x-text="sel && taka(sel.amount)"></b> leaves the account, and invoice payments or advance it created go back.
+        This cannot be undone.</p>
+      <p class="modal-err" x-show="delError" x-text="delError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="confirmDel = false" :disabled="deleting">Keep it</button>
+        <button type="button" class="btn btn-danger" @click="remove()" :disabled="deleting">
+          <span x-text="deleting ? 'Cancelling…' : 'Cancel receipt'"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  {# ───────────── toast ───────────── #}
+  <div class="toast" x-show="toast" x-cloak x-transition.opacity role="status" x-text="toast"></div>
+</div>
+{% endblock %}

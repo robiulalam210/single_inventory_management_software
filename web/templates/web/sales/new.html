@@ -1,0 +1,207 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/sell.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  <a class="btn btn-ghost top-act" href="{% url 'web:pos' %}">{% icon "store" 18 %}<span>Switch to POS</span></a>
+{% endblock %}
+{% block content %}
+{{ sell_init|json_script:"sell-init" }}
+<div x-data="saleForm(JSON.parse(document.getElementById('sell-init').textContent))">
+
+  {# ───────────── saved ───────────── #}
+  <template x-if="done">
+    <section class="panel mr-done">
+      <div class="mr-done-ic">{% icon "check" 28 %}</div>
+      <h2><span x-text="done.invoice_no"></span> saved</h2>
+      <p class="mr-done-amt" x-text="taka(done.grand_total)"></p>
+      <p class="mr-done-sub">sold to <b x-text="done.customer_name || 'Walk-in customer'"></b>,
+        <span x-text="done.items.length + (done.items.length === 1 ? ' product' : ' products')"></span></p>
+      <ul class="mr-done-lines">
+        <li><span>Received</span><b x-text="taka(done.paid_amount)"></b></li>
+        <li x-show="Number(done.change_amount) > 0"><span>Change returned</span><b x-text="taka(done.change_amount)"></b></li>
+        <li x-show="Number(done.due_amount) > 0"><span>Due from customer</span><b class="txt-due" x-text="taka(done.due_amount)"></b></li>
+      </ul>
+      <div class="mr-done-actions">
+        <template x-if="canSeeList">
+          <a class="btn btn-ghost" :href="'{% url 'web:sales' %}?period=all&open=' + done.id">{% icon "printer" 18 %} View &amp; print invoice</a>
+        </template>
+        <button type="button" class="btn btn-primary" @click="again()">{% icon "plus" 18 %} New sale</button>
+      </div>
+    </section>
+  </template>
+
+  {# ───────────── form ───────────── #}
+  <form x-show="!done" class="mr-grid po-grid" @submit.prevent="save()" novalidate
+        @keydown.enter="if ($event.target.tagName === 'INPUT') $event.preventDefault()">
+    <div class="po-main">
+      <section class="panel mr-form">
+
+        {# 1 — customer #}
+        <div class="fgroup">
+          <div class="fgroup-head"><span class="step">1</span><h3>Customer</h3></div>
+          <div class="fld-row po-head">
+            <div class="fld" :class="{ 'has-error': errors.customer }">
+              <label class="fld-label">Who is buying</label>
+              <div class="seg seg-fill cust-seg" role="radiogroup" aria-label="Customer type">
+                <button type="button" role="radio" :aria-checked="(cust.mode === 'walk_in').toString()" :class="{ 'is-on': cust.mode === 'walk_in' }" @click="cust.mode = 'walk_in'">Walk-in</button>
+                <button type="button" role="radio" :aria-checked="(cust.mode === 'saved').toString()" :class="{ 'is-on': cust.mode === 'saved' }" @click="cust.mode = 'saved'">Saved customer</button>
+              </div>
+              <div x-show="cust.mode === 'saved'" x-cloak style="margin-top:10px">
+                {% include "web/_combo.html" with model="cust.id" source="customers" placeholder="Search customer by name or phone" icon="users" %}
+              </div>
+              <p class="fld-err" x-show="errors.customer" x-text="errors.customer"></p>
+              <p class="fld-hint" x-show="cust.mode === 'walk_in'">Walk-in customers pay in full. To sell on credit, choose a saved customer.</p>
+              <p class="fld-hint" x-show="customer && Number(customer.total_due) > 0" x-cloak>
+                Already owes <b class="txt-due" x-text="customer && taka(customer.total_due)"></b>.</p>
+            </div>
+            <div class="fld" :class="{ 'has-error': errors.date }">
+              <label class="fld-label" for="sl-date">Sale date</label>
+              <input id="sl-date" class="in" type="date" x-model="date" :max="maxDate" @change="errors.date = ''">
+              <p class="fld-err" x-show="errors.date" x-text="errors.date"></p>
+            </div>
+          </div>
+        </div>
+
+        {# 2 — products #}
+        <div class="fgroup">
+          <div class="fgroup-head"><span class="step">2</span><h3>Products</h3>
+            <span class="fgroup-meta" x-show="rows.length" x-text="rows.length + (rows.length === 1 ? ' product, ' : ' products, ') + num(qtyTotal) + ' pcs'"></span></div>
+
+          <div class="psearch" @click.outside="showResults = false" :class="{ 'has-error': errors.items && !rows.length }">
+            <div class="psearch-box">
+              {% icon "search" 18 %}
+              <input x-ref="pq" type="text" x-model="pq" autocomplete="off" placeholder="Search product by name, or scan / type the SKU and press Enter"
+                     @focus="showResults = !!results.length" @keydown.arrow-down.prevent="move(1)" @keydown.arrow-up.prevent="move(-1)"
+                     @keydown.enter.prevent="searchEnter()" @keydown.escape="showResults = false" aria-label="Search products">
+              <span class="psearch-spin" x-show="searching" x-cloak></span>
+            </div>
+            <ul class="psearch-pop" x-ref="results" x-show="showResults && pq.trim()" x-cloak role="listbox">
+              <template x-for="(p, i) in results" :key="p.id">
+                <li role="option" :class="{ 'is-hi': i === hi, 'is-off': p.stock <= 0 }" @mouseenter="hi = i" @click="pick(p)">
+                  <div><b x-text="p.name"></b><span x-text="[p.sku, p.stock > 0 ? 'In stock ' + num(p.stock) + (p.unit ? ' ' + p.unit : '') : 'Out of stock'].filter(Boolean).join(' · ')"></span></div>
+                  <small x-text="taka(p.price)"></small>
+                </li>
+              </template>
+              <li class="combo-none" x-show="!searching && !results.length">No product matches “<span x-text="pq"></span>”</li>
+            </ul>
+          </div>
+          <p class="fld-err" x-show="errors.items" x-text="errors.items"></p>
+
+          <div class="po-items" x-show="rows.length" x-cloak>
+            <div class="po-row po-row-head" aria-hidden="true">
+              <span>Product</span><span class="num">Qty</span><span class="num">Price</span><span class="num">Discount</span><span class="num">Amount</span><span></span>
+            </div>
+            <template x-for="r in rows" :key="r.key">
+              <div class="po-row" :data-row="r.key" :class="{ 'row-err': r.err }">
+                <div class="po-prod">
+                  <b x-text="r.name"></b>
+                  <span x-text="[r.sku, 'In stock ' + num(r.stock)].filter(Boolean).join(' · ')"></span>
+                  <em class="down" x-show="Number(r.price) > 0 && Number(r.price) < r.listPrice" x-cloak x-text="'List price ' + taka(r.listPrice)"></em>
+                </div>
+                <label class="po-cell"><span class="po-k">Qty</span>
+                  <input class="in num qty-in" type="text" inputmode="decimal" x-model="r.qty" @input="r.qty = r.qty.replace(/[^0-9.]/g, ''); r.err = stockErr(r)"
+                         @keydown.enter.prevent="backToSearch()" :aria-label="'Quantity of ' + r.name"></label>
+                <label class="po-cell"><span class="po-k">Price</span>
+                  <input class="in num" type="text" inputmode="decimal" x-model="r.price" @input="r.price = r.price.replace(/[^0-9.]/g, ''); r.err = stockErr(r)"
+                         @keydown.enter.prevent="backToSearch()" :aria-label="'Price of ' + r.name"></label>
+                <div class="po-cell"><span class="po-k">Discount</span>
+                  <div class="in-unit">
+                    <input class="in num" type="text" inputmode="decimal" placeholder="0" x-model="r.discount" @input="r.discount = r.discount.replace(/[^0-9.]/g, '')" :aria-label="'Discount on ' + r.name">
+                    <button type="button" class="unit-tg" @click="r.discount_type = r.discount_type === 'fixed' ? 'percent' : 'fixed'" x-text="r.discount_type === 'fixed' ? '৳' : '%'"></button>
+                  </div>
+                </div>
+                <div class="po-amt"><span class="po-k">Amount</span><b x-text="taka(lineOf(r))"></b></div>
+                <button type="button" class="icon-btn po-x" @click="remove(r)" :aria-label="'Remove ' + r.name">{% icon "x" 16 %}</button>
+                <p class="po-err" x-show="r.err" x-text="r.err"></p>
+              </div>
+            </template>
+          </div>
+          <div class="po-empty" x-show="!rows.length">
+            {% icon "cart" 22 %}<span>Search a product above to add it. Scanning a barcode adds it straight away.</span>
+          </div>
+        </div>
+
+        {# 3 — charges #}
+        <div class="fgroup">
+          <div class="fgroup-head"><span class="step">3</span><h3>Discount and charges</h3><span class="fgroup-meta">optional</span></div>
+          <div class="po-charges">
+            <template x-for="c in [ { k: 'discount', label: 'Discount' }, { k: 'vat', label: 'VAT' }, { k: 'service', label: 'Service charge' }, { k: 'delivery', label: 'Delivery charge' } ]" :key="c.k">
+              <div class="fld">
+                <label class="fld-label" x-text="c.label"></label>
+                <div class="in-unit">
+                  <input class="in num" type="text" inputmode="decimal" placeholder="0" x-model="ch[c.k]" @input="ch[c.k] = ch[c.k].replace(/[^0-9.]/g, '')" :aria-label="c.label">
+                  <button type="button" class="unit-tg" @click="ch[c.k + '_type'] = ch[c.k + '_type'] === 'fixed' ? 'percent' : 'fixed'" x-text="ch[c.k + '_type'] === 'fixed' ? '৳' : '%'"></button>
+                </div>
+              </div>
+            </template>
+          </div>
+          <div class="fld-row">
+            <div class="fld">
+              <label class="fld-label">Sold by</label>
+              <template x-if="canPickSeller"><div>{% include "web/_combo.html" with model="seller" source="users" placeholder="Choose staff" icon="user" noclear=1 %}</div></template>
+              <template x-if="!canPickSeller"><div class="in in-static">{% icon "user" 17 %}<span x-text="me.name"></span></div></template>
+            </div>
+            <div class="fld">
+              <label class="fld-label" for="sl-remark">Note <small>(optional)</small></label>
+              <input id="sl-remark" class="in" type="text" maxlength="300" x-model="remark" placeholder="Printed on the invoice">
+            </div>
+          </div>
+        </div>
+
+        {# 4 — payment #}
+        <div class="fgroup">
+          <div class="fgroup-head"><span class="step">4</span><h3>Payment</h3></div>
+          <div class="fld-row">
+            <div class="fld" :class="{ 'has-error': errors.received }">
+              <label class="fld-label" for="sl-recv">Received from customer</label>
+              <div class="money-in"><span>৳</span>
+                <input id="sl-recv" type="text" inputmode="decimal" placeholder="0.00" x-model="pay.received"
+                       @input="pay.followTotal = false; errors.received = ''; pay.received = pay.received.replace(/[^0-9.,]/g, '')"></div>
+              <div class="quick">
+                <button type="button" class="chip" @click="setReceived(t.grand)">Exact <span x-text="taka(t.grand)"></span></button>
+                <template x-for="v in quickCash()" :key="v"><button type="button" class="chip" @click="setReceived(v)" x-text="taka(v)"></button></template>
+                <button type="button" class="chip" x-show="cust.mode === 'saved'" @click="setReceived(0)">On credit</button>
+              </div>
+              <p class="fld-err" x-show="errors.received" x-text="errors.received"></p>
+            </div>
+            <div class="fld" x-show="receivedNum > 0">
+              <label class="fld-label">Payment method</label>
+              <div class="seg seg-fill" role="radiogroup" aria-label="Payment method">
+                <template x-for="m in methods" :key="m.value">
+                  <button type="button" role="radio" :aria-checked="(pay.method === m.value).toString()" :class="{ 'is-on': pay.method === m.value }" @click="pay.method = m.value; errors.account = ''" x-text="m.label"></button>
+                </template>
+              </div>
+              <div style="margin-top:10px" :class="{ 'has-error': errors.account }">
+                {% include "web/_combo.html" with model="pay.account" source="accounts" placeholder="Into account" icon="wallet" noclear=1 %}
+                <p class="fld-err" x-show="errors.account" x-text="errors.account"></p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    {# ───────────── summary ───────────── #}
+    <aside class="panel mr-side">
+      <h3>Invoice total</h3>
+      <dl class="po-sum">
+        <div><dt>Subtotal <small x-text="rows.length ? '(' + num(qtyTotal) + ' pcs)' : ''"></small></dt><dd x-text="taka(t.sub)"></dd></div>
+        <div x-show="t.itemOff" class="po-note"><dt>Item discounts</dt><dd x-text="'incl. − ' + taka(t.itemOff)"></dd></div>
+        <div x-show="t.discount"><dt>Discount</dt><dd x-text="'− ' + taka(t.discount)"></dd></div>
+        <div x-show="t.vat"><dt>VAT</dt><dd x-text="taka(t.vat)"></dd></div>
+        <div x-show="t.service"><dt>Service charge</dt><dd x-text="taka(t.service)"></dd></div>
+        <div x-show="t.delivery"><dt>Delivery charge</dt><dd x-text="taka(t.delivery)"></dd></div>
+        <div class="po-grand"><dt>Total</dt><dd x-text="taka(t.grand)"></dd></div>
+        <div><dt>Received</dt><dd x-text="taka(receivedNum)"></dd></div>
+        <div class="po-due is-zero" x-show="change > 0"><dt>Change to return</dt><dd x-text="taka(change)"></dd></div>
+        <div class="po-due" x-show="due > 0"><dt>Due from customer</dt><dd x-text="taka(due)"></dd></div>
+      </dl>
+      <p class="form-err" x-show="serverError" x-cloak role="alert">{% icon "alert" 16 %}<span x-text="serverError"></span></p>
+      <button type="submit" class="btn btn-primary btn-block" :disabled="saving">
+        <span x-text="saving ? 'Saving…' : (t.grand ? 'Save sale, ' + taka(t.grand) : 'Save sale')"></span>
+      </button>
+      <p class="po-foot">Stock goes down as soon as you save.</p>
+    </aside>
+  </form>
+</div>
+{% endblock %}

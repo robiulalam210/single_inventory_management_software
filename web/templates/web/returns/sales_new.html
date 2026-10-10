@@ -1,0 +1,135 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/returns.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  {% if form_init.canSeeList %}<a class="btn btn-ghost top-act" href="{% url 'web:sales_returns' %}">{% icon "return" 18 %}<span>All sales returns</span></a>{% endif %}
+{% endblock %}
+{% block content %}
+{{ form_init|json_script:"sr-init" }}
+<div x-data="salesReturnForm(JSON.parse(document.getElementById('sr-init').textContent))">
+
+  <template x-if="done">
+    <section class="panel mr-done">
+      <div class="mr-done-ic">{% icon "check" 28 %}</div>
+      <h2>Sales return saved</h2>
+      <p class="mr-done-amt" x-text="taka(done.return_amount || done.total)"></p>
+      <p class="mr-done-sub">for <b x-text="done.receipt_no"></b>, status <b x-text="(done.status || 'pending')"></b></p>
+      <div class="mr-done-actions">
+        <template x-if="canSeeList"><a class="btn btn-ghost" href="{% url 'web:sales_returns' %}?saved=1">View all returns</a></template>
+        <button type="button" class="btn btn-primary" @click="again()">{% icon "plus" 18 %} New return</button>
+      </div>
+    </section>
+  </template>
+
+  <form x-show="!done" class="mr-grid" @submit.prevent="save()" novalidate>
+    <section class="panel mr-form">
+
+      <div class="fgroup">
+        <div class="fgroup-head"><span class="step">1</span><h3>Which sale is coming back</h3></div>
+        <div class="fld" :class="{ 'has-error': errors.invoice }">
+          <label class="fld-label">Invoice <i>*</i></label>
+          {% include "web/_combo.html" with model="form.invoice" source="invoiceOptions" placeholder="Search invoice no. or customer" icon="receipt" %}
+          <p class="fld-err" x-show="errors.invoice" x-text="errors.invoice"></p>
+          <p class="fld-hint" x-show="loading">Loading invoices…</p>
+        </div>
+        <div class="fld" x-show="invoice" x-cloak>
+          <label class="fld-label">Customer</label>
+          <div class="in in-static">{% icon "user" 17 %}<span x-text="customerName"></span></div>
+        </div>
+      </div>
+
+      <div class="fgroup" x-show="invoice" x-cloak>
+        <div class="fgroup-head"><span class="step">2</span><h3>Products to return</h3></div>
+        <p class="fld-err" x-show="errors.items" x-text="errors.items"></p>
+        <table class="rt-items" :class="{ 'has-error': errors.items }">
+          <thead><tr><th>Product</th><th class="num">Price</th><th class="num">Return qty</th><th class="num">Damaged</th><th class="num">Total</th><th></th></tr></thead>
+          <tbody>
+            <template x-for="(l, i) in lines" :key="l.productId + '-' + i">
+              <tr>
+                <td><b x-text="l.name"></b><span class="sub" x-text="'Sold: ' + l.max"></span></td>
+                <td class="num" x-text="taka(l.price)"></td>
+                <td class="num"><input class="in qty-in" type="number" min="0" :max="l.max" step="1" :value="l.qty"
+                    @input="setQty(l, $event.target.value); $event.target.value = l.qty" aria-label="Return quantity"></td>
+                <td class="num"><input class="in qty-in" type="number" min="0" :max="l.qty" step="1" :value="l.damage"
+                    @input="setDamage(l, $event.target.value); $event.target.value = l.damage" aria-label="Damaged quantity"></td>
+                <td class="num"><b x-text="taka(lineTotal(l))"></b></td>
+                <td><button type="button" class="icon-btn" @click="remove(i)" aria-label="Remove product">{% icon "x" 16 %}</button></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+        <p class="fld-hint">Damaged items are counted inside the return quantity.</p>
+      </div>
+
+      <div class="fgroup" x-show="invoice" x-cloak>
+        <div class="fgroup-head"><span class="step">3</span><h3>Refund details</h3></div>
+        <div class="fld-row">
+          <div class="fld" :class="{ 'has-error': errors.date }">
+            <label class="fld-label" for="sr-date">Return date <i>*</i></label>
+            <input id="sr-date" class="in" type="date" x-model="form.date" :max="maxDate" @change="errors.date = ''">
+            <p class="fld-err" x-show="errors.date" x-text="errors.date"></p>
+          </div>
+          <div class="fld" :class="{ 'has-error': errors.charge }">
+            <label class="fld-label" for="sr-charge">Return charge <small>(optional)</small></label>
+            <div class="money-in">
+              <span x-text="form.chargeType === 'percentage' ? '%' : '৳'"></span>
+              <input id="sr-charge" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00"
+                     x-model="form.charge" @input="errors.charge = ''; form.charge = form.charge.replace(/[^0-9.]/g, '')">
+            </div>
+            <div class="seg seg-sm" role="radiogroup" aria-label="Charge type" style="margin-top:6px">
+              <template x-for="c in chargeTypes" :key="c.value">
+                <button type="button" role="radio" :aria-checked="(form.chargeType === c.value).toString()"
+                        :class="{ 'is-on': form.chargeType === c.value }" @click="form.chargeType = c.value" x-text="c.label"></button>
+              </template>
+            </div>
+            <p class="fld-err" x-show="errors.charge" x-text="errors.charge"></p>
+          </div>
+        </div>
+
+        <div class="fld">
+          <label class="fld-label">Payment method <i>*</i></label>
+          <div class="seg seg-fill" role="radiogroup" aria-label="Payment method">
+            <template x-for="m in methods" :key="m.value">
+              <button type="button" role="radio" :aria-checked="(form.method === m.value).toString()"
+                      :class="{ 'is-on': form.method === m.value }" @click="form.method = m.value" x-text="m.label"></button>
+            </template>
+          </div>
+        </div>
+
+        <div class="fld" :class="{ 'has-error': errors.account }">
+          <label class="fld-label">Account <i>*</i></label>
+          {% include "web/_combo.html" with model="form.account" source="accounts" placeholder="Choose account" icon="wallet" noclear=1 %}
+          <p class="fld-err" x-show="errors.account" x-text="errors.account"></p>
+        </div>
+
+        <div class="fld">
+          <label class="fld-label" for="sr-reason">Reason</label>
+          <textarea id="sr-reason" class="in" rows="2" maxlength="500" x-model="form.reason" placeholder="Why is the customer returning this?"></textarea>
+        </div>
+
+        <template x-if="canApprove">
+          <label class="check"><input type="checkbox" x-model="form.autoApprove"><span>Approve right away (skip the pending step)</span></label>
+        </template>
+      </div>
+    </section>
+
+    <aside class="panel mr-side">
+      <h3>Return summary</h3>
+      <div class="mr-side-amt">
+        <span>Return amount</span>
+        <b x-text="taka(total)"></b>
+        <small x-text="invoice ? 'for ' + customerName : 'Choose an invoice to begin'"></small>
+      </div>
+      <div class="rt-sum" style="max-width:none" x-show="invoice">
+        <p><span>Subtotal</span><b x-text="taka(subtotal)"></b></p>
+        <p><span>Return charge</span><b x-text="taka(chargeAmount)"></b></p>
+        <p class="is-total"><span>Total</span><b x-text="taka(total)"></b></p>
+      </div>
+      <p class="form-err" x-show="serverError" x-cloak role="alert">{% icon "alert" 16 %}<span x-text="serverError"></span></p>
+      <button type="submit" class="btn btn-primary btn-block" :disabled="saving || !invoice">
+        <span x-text="saving ? 'Saving…' : 'Submit return'"></span>
+      </button>
+    </aside>
+  </form>
+</div>
+{% endblock %}

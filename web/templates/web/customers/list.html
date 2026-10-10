@@ -1,0 +1,313 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/customers.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  {% if cu_perms.create %}<button type="button" class="btn btn-primary top-act" onclick="window.dispatchEvent(new CustomEvent('customer-new'))">{% icon "plus" 18 %}<span>New customer</span></button>{% endif %}
+{% endblock %}
+{% block content %}
+{{ cu_perms|json_script:"cu-perms" }}
+{{ web_company.name|json_script:"cu-company" }}
+<div x-data="customerList(JSON.parse(document.getElementById('cu-perms').textContent), JSON.parse(document.getElementById('cu-company').textContent))"
+     @customer-new.window="openForm(null)"
+     @keydown.escape.window="formOpen ? (formOpen = false) : (confirmDel ? (confirmDel = false) : shut())">
+
+  <section class="panel filters">
+    <div class="f-row">
+      <label class="f-search">
+        {% icon "search" 18 %}
+        <input type="search" x-model="f.q" placeholder="Search name, phone, email or address" aria-label="Search customers">
+      </label>
+      <div class="seg seg-sm" role="tablist" aria-label="Sort">
+        <template x-for="o in sorts" :key="o.key">
+          <button type="button" :class="{ 'is-on': f.sort === o.key }" @click="f.sort = o.key" x-text="o.label"></button>
+        </template>
+      </div>
+    </div>
+    <div class="f-row">
+      <div class="chips" role="radiogroup" aria-label="Show">
+        <template x-for="c in views" :key="c.key">
+          <button type="button" class="chip" role="radio" :aria-checked="(f.view === c.key).toString()"
+                  :class="{ 'is-on': f.view === c.key }" @click="f.view = c.key" x-text="c.label"></button>
+        </template>
+      </div>
+      <div class="f-combos">
+        <button type="button" class="btn-link" x-show="filtered" x-cloak @click="clearAll()">{% icon "filter-x" 16 %} Reset</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="sumbar" aria-live="polite">
+    <div><span>Active customers</span><b x-text="tot ? num(tot.active) : '—'"></b></div>
+    <div><span>Sold so far</span><b x-text="tot ? taka(tot.sold) : '—'"></b></div>
+    <div><span>Collected so far</span><b class="txt-ok" x-text="tot ? taka(tot.paid) : '—'"></b></div>
+    <div><span>Customers owe you</span><b :class="{ 'txt-due': tot && tot.due > 0 }" x-text="tot ? taka(tot.due) : '—'"></b></div>
+    <div class="sum-period"><span>Advance you hold</span><b x-text="tot ? taka(tot.advance) : '—'"></b>
+      <small class="sum-note" x-show="tot && tot.owing" x-text="tot && (tot.owing + (tot.owing === 1 ? ' customer has' : ' customers have') + ' money to pay')"></small></div>
+  </div>
+
+  <section class="panel">
+    <template x-if="error">
+      <div class="empty">
+        <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2>Couldn't load customers</h2><p x-text="error"></p>
+        <button class="btn btn-ghost" @click="fetch()">Try again</button>
+      </div>
+    </template>
+    <template x-if="!error">
+      <div>
+        <table class="dt" :class="{ 'is-loading': loading }">
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th class="hide-md">Phone</th>
+              <th class="num hide-md">Bought</th>
+              <th class="num hide-md">Paid</th>
+              <th class="num">Owes you</th>
+              <th class="c">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in rows" :key="r.id">
+              <tr tabindex="0" @click="open(r)" @keydown.enter="open(r)" :aria-label="'Open ' + r.name" :class="{ 'is-void': !r.is_active }">
+                <td data-k="Invoice">
+                  <b x-text="r.name"></b>
+                  <span class="sub"><span x-text="r.client_no"></span><span class="vip" x-show="r.special_customer"> · Special</span></span>
+                </td>
+                <td class="hide-md" data-k="Phone" x-text="r.phone || '—'"></td>
+                <td class="num hide-md" data-k="Bought">
+                  <span x-text="taka(bought(r))"></span>
+                  <span class="sub" x-text="num(r.total_sales) + (r.total_sales == 1 ? ' sale' : ' sales')"></span>
+                </td>
+                <td class="num hide-md" data-k="Paid" x-text="taka(r.total_paid)"></td>
+                <td class="num" data-k="Total">
+                  <b :class="{ 'txt-due': Number(r.total_due) > 0 }" x-text="Number(r.total_due) > 0 ? taka(r.total_due) : '—'"></b>
+                  <span class="sub txt-adv" x-show="Number(r.advance_balance) > 0" x-text="'Advance ' + taka(r.advance_balance)"></span>
+                </td>
+                <td class="c" data-k="Status"><span class="pill" :class="badge(r).cls" x-text="badge(r).label"></span></td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !rows.length ? 6 : 0)" :key="'sk' + i">
+              <tr class="sk-row"><td colspan="6"><span class="sk-line"></span></td></tr>
+            </template>
+          </tbody>
+        </table>
+        <template x-if="!loading && !rows.length">
+          <div class="empty">
+            <div class="tile">{% icon "users" 26 %}</div>
+            <h2 x-text="filtered ? 'No customers match' : 'No customers yet'"></h2>
+            <p x-text="filtered ? 'Try another search or clear the filters.' : 'Save regular buyers here so you can sell on credit and track what they owe.'"></p>
+            <button class="btn btn-ghost" x-show="filtered" @click="clearAll()">Reset filters</button>
+            <template x-if="!filtered && perms.create"><button class="btn btn-primary" @click="openForm(null)">{% icon "plus" 18 %} New customer</button></template>
+          </div>
+        </template>
+        <nav class="pager" x-show="meta.count > 0" aria-label="Pages">
+          <span class="pager-info" x-text="`Showing ${from}–${to} of ${num(meta.count)}`"></span>
+          <div class="pager-btns" x-show="meta.total_pages > 1">
+            <button type="button" class="icon-btn" :disabled="page <= 1" @click="go(page - 1)" aria-label="Previous page">{% icon "chevron-left" 18 %}</button>
+            <template x-for="(p, i) in pages" :key="i + '-' + p">
+              <button type="button" class="pg" :class="{ 'is-on': p === page }" :disabled="p === '…'" @click="go(p)" x-text="p"></button>
+            </template>
+            <button type="button" class="icon-btn" :disabled="page >= meta.total_pages" @click="go(page + 1)" aria-label="Next page">{% icon "chevron-right" 18 %}</button>
+          </div>
+        </nav>
+      </div>
+    </template>
+  </section>
+
+  {# ───────────── customer drawer ───────────── #}
+  <div class="drawer-wrap" x-show="sel" x-cloak x-transition.opacity.duration.150ms @click.self="shut()">
+    <aside class="drawer drawer-wide" role="dialog" aria-modal="true" aria-label="Customer" x-show="sel"
+           x-transition:enter="drawer-in" x-transition:enter-start="drawer-from" x-transition:enter-end="drawer-to">
+      <template x-if="sel">
+        <div class="drawer-body">
+          <header class="drawer-head no-print">
+            <div>
+              <h2 x-text="sel.name"></h2>
+              <span class="pill" :class="badge(sel).cls" x-text="badge(sel).label"></span>
+            </div>
+            <div class="drawer-actions">
+              <template x-if="perms.delete"><button type="button" class="icon-btn danger" @click="askDelete()" aria-label="Delete customer" title="Delete">{% icon "trash" 18 %}</button></template>
+              <template x-if="perms.edit"><button type="button" class="btn btn-ghost" @click="openForm(sel)">{% icon "settings" 17 %} <span>Edit</span></button></template>
+              <button type="button" class="icon-btn" @click="shut()" aria-label="Close">{% icon "x" 18 %}</button>
+            </div>
+          </header>
+
+          <div class="dtabs no-print" role="tablist">
+            <button type="button" role="tab" :class="{ 'is-on': tab === 'overview' }" @click="tab = 'overview'">Overview</button>
+            <template x-if="perms.statement"><button type="button" role="tab" :class="{ 'is-on': tab === 'statement' }" @click="openStatement()">Statement</button></template>
+          </div>
+
+          {# ── overview ── #}
+          <div class="sp-body no-print" x-show="tab === 'overview'">
+            <div class="sp-contact">
+              <template x-if="sel.phone"><a :href="'tel:' + sel.phone">{% icon "phone" 16 %}<span x-text="sel.phone"></span></a></template>
+              <template x-if="sel.email"><a :href="'mailto:' + sel.email">{% icon "mail" 16 %}<span x-text="sel.email"></span></a></template>
+              <template x-if="sel.address"><p>{% icon "building" 16 %}<span x-text="sel.address"></span></p></template>
+              <p class="sp-no" x-text="[sel.client_no, sel.special_customer ? 'Special customer' : '', 'Since ' + date(sel.date_created)].filter(Boolean).join(' · ')"></p>
+            </div>
+            <div class="sp-stats">
+              <div><span>Bought</span><b x-text="taka(bought(sel))"></b><small x-text="num(sel.total_sales) + (sel.total_sales == 1 ? ' sale' : ' sales')"></small></div>
+              <div><span>Paid</span><b x-text="taka(sel.total_paid)"></b></div>
+              <div class="is-due" :class="{ 'is-zero': !(Number(sel.total_due) > 0) }"><span>Owes you</span><b x-text="taka(sel.total_due)"></b></div>
+              <div><span>Advance held</span><b x-text="taka(sel.advance_balance)"></b></div>
+            </div>
+            <div class="sp-actions">
+              <template x-if="perms.collect && sel.is_active">
+                <a class="btn" :class="Number(sel.total_due) > 0 ? 'btn-primary' : 'btn-ghost'" :href="'{% url 'web:receipt_new' %}?customer=' + sel.id">{% icon "coins" 18 %} Collect payment</a>
+              </template>
+              <template x-if="perms.sell && sel.is_active">
+                <a class="btn btn-ghost" :href="'{% url 'web:sale_new' %}?customer=' + sel.id">{% icon "cart" 18 %} New sale</a>
+              </template>
+            </div>
+
+            <template x-if="perms.sales">
+              <section class="sp-sec">
+                <div class="sp-sec-head"><h3>Recent sales</h3>
+                  <a :href="'{% url 'web:sales' %}?period=all&customer=' + sel.id" x-show="recentSales && recentSales.length">All sales {% icon "arrow-right" 14 %}</a></div>
+                <ul class="rows compact">
+                  <template x-for="s in (recentSales || [])" :key="s.id">
+                    <li>
+                      <div class="row-main"><b x-text="s.invoice_no"></b><span x-text="date(s.sale_date) + ', ' + s.items.length + (s.items.length === 1 ? ' item' : ' items')"></span></div>
+                      <div class="row-amt"><b x-text="taka(s.grand_total)"></b>
+                        <span :class="Number(s.due_amount) > 0 ? 'txt-due' : 'txt-ok'" x-text="Number(s.due_amount) > 0 ? taka(s.due_amount) + ' due' : 'Paid'"></span></div>
+                    </li>
+                  </template>
+                  <li class="rows-empty" x-show="recentSales && !recentSales.length">No sales to this customer yet.</li>
+                  <li class="rows-empty" x-show="!recentSales">Loading…</li>
+                </ul>
+              </section>
+            </template>
+            <template x-if="perms.receipts">
+              <section class="sp-sec">
+                <div class="sp-sec-head"><h3>Recent payments</h3>
+                  <a :href="'{% url 'web:receipts' %}?period=all&customer=' + sel.id" x-show="recentPay && recentPay.length">All receipts {% icon "arrow-right" 14 %}</a></div>
+                <ul class="rows compact">
+                  <template x-for="p in (recentPay || [])" :key="p.id">
+                    <li>
+                      <div class="row-main"><b x-text="p.mr_no"></b><span x-text="date(p.payment_date) + ', ' + payFor(p)"></span></div>
+                      <div class="row-amt"><b class="txt-ok" x-text="taka(p.amount)"></b></div>
+                    </li>
+                  </template>
+                  <li class="rows-empty" x-show="recentPay && !recentPay.length">No payments received yet.</li>
+                  <li class="rows-empty" x-show="!recentPay">Loading…</li>
+                </ul>
+              </section>
+            </template>
+          </div>
+
+          {# ── statement ── #}
+          <div x-show="tab === 'statement'" x-cloak>
+            <div class="st-bar no-print">
+              <div class="seg seg-sm">
+                <template x-for="p in stPresets" :key="p.key">
+                  <button type="button" :class="{ 'is-on': st.preset === p.key }" @click="setStPreset(p.key)" x-text="p.label"></button>
+                </template>
+              </div>
+              <button type="button" class="btn btn-ghost" @click="print()" :disabled="!st.rows">{% icon "printer" 18 %} <span>Print</span></button>
+            </div>
+            <div class="st-custom no-print" x-show="st.preset === 'custom'">
+              <label class="f-date"><span>From</span><input type="date" x-model="st.from" @change="loadStatement()"></label>
+              <label class="f-date"><span>To</span><input type="date" x-model="st.to" @change="loadStatement()"></label>
+            </div>
+
+            <div class="statement print-area">
+              <div class="inv-top">
+                <div><b class="inv-co" x-text="company"></b><span>Customer statement</span></div>
+                <div class="inv-meta"><b x-text="sel.name"></b><span x-text="stRangeText"></span></div>
+              </div>
+              <template x-if="st.error"><p class="form-err">{% icon "alert" 16 %}<span x-text="st.error"></span></p></template>
+              <template x-if="st.summary">
+                <div class="st-sum">
+                  <div><span>Opening</span><b x-text="taka(st.summary.opening_balance)"></b></div>
+                  <div><span>Sold</span><b x-text="taka(st.summary.total_debit)"></b></div>
+                  <div><span>Paid</span><b class="txt-ok" x-text="taka(st.summary.total_credit)"></b></div>
+                  <div class="is-due" :class="{ 'is-zero': st.summary.closing_balance <= 0 }"><span x-text="st.summary.closing_balance < 0 ? 'Advance' : 'Balance due'"></span><b x-text="taka(Math.abs(st.summary.closing_balance))"></b></div>
+                </div>
+              </template>
+              <table class="inv-items st-table">
+                <thead><tr><th>Date</th><th>Details</th><th class="num">Sold</th><th class="num">Paid</th><th class="num">Balance</th></tr></thead>
+                <tbody>
+                  <template x-for="e in (st.rows || [])" :key="e.sl">
+                    <tr :class="{ 'st-open': e.type === 'Opening' }">
+                      <td x-text="date(e.date)"></td>
+                      <td><b x-text="e.type === 'Opening' ? 'Opening balance' : e.voucher_no"></b><span class="sub" x-show="e.type !== 'Opening'" x-text="e.type === 'Sale' ? 'Sale' : e.details"></span></td>
+                      <td class="num" x-text="e.debit ? taka(e.debit) : ''"></td>
+                      <td class="num" x-text="e.credit ? taka(e.credit) : ''"></td>
+                      <td class="num" :class="{ 'txt-adv': e.due < 0 }" x-text="balanceText(e.due)"></td>
+                    </tr>
+                  </template>
+                  <tr x-show="st.loading"><td colspan="5" class="rows-empty">Loading…</td></tr>
+                  <tr x-show="st.rows && st.rows.length <= 1 && !st.loading"><td colspan="5" class="rows-empty">No sales or payments in this period.</td></tr>
+                </tbody>
+              </table>
+              <p class="inv-note">Positive balance means the customer owes you. "Adv" means you hold their money in advance.</p>
+            </div>
+          </div>
+        </div>
+      </template>
+    </aside>
+  </div>
+
+  {# ───────────── add / edit ───────────── #}
+  <div class="modal-wrap" x-show="formOpen" x-cloak x-transition.opacity.duration.120ms @click.self="formOpen = false" role="dialog" aria-modal="true" aria-labelledby="cf-title">
+    <form class="modal modal-wide" @submit.prevent="saveForm()" novalidate>
+      <h2 id="cf-title" x-text="form.id ? 'Edit customer' : 'New customer'"></h2>
+      <p class="modal-sub">A phone number helps you find them quickly at the counter.</p>
+      <div class="fld-row">
+        <div class="fld" :class="{ 'has-error': fe.name }">
+          <label class="fld-label" for="cf-name">Name <i>*</i></label>
+          <input id="cf-name" x-ref="cfName" class="in" type="text" maxlength="100" x-model="form.name" @input="fe.name = ''">
+          <p class="fld-err" x-show="fe.name" x-text="fe.name"></p>
+        </div>
+        <div class="fld" :class="{ 'has-error': fe.phone }">
+          <label class="fld-label" for="cf-phone">Phone</label>
+          <input id="cf-phone" class="in" type="tel" maxlength="20" x-model="form.phone" @input="fe.phone = ''" placeholder="01XXXXXXXXX">
+          <p class="fld-err" x-show="fe.phone" x-text="fe.phone"></p>
+        </div>
+      </div>
+      <div class="fld" :class="{ 'has-error': fe.email }">
+        <label class="fld-label" for="cf-email">Email</label>
+        <input id="cf-email" class="in" type="email" x-model="form.email" @input="fe.email = ''" placeholder="Optional">
+        <p class="fld-err" x-show="fe.email" x-text="fe.email"></p>
+      </div>
+      <div class="fld">
+        <label class="fld-label" for="cf-addr">Address</label>
+        <input id="cf-addr" class="in" type="text" x-model="form.address" placeholder="Optional">
+      </div>
+      <label class="switch">
+        <input type="checkbox" x-model="form.special_customer">
+        <span class="switch-ui" aria-hidden="true"></span>
+        <span><b>Special customer</b><small>Mark regular or wholesale buyers so they stand out in lists.</small></span>
+      </label>
+      <label class="switch" x-show="form.id">
+        <input type="checkbox" x-model="form.is_active">
+        <span class="switch-ui" aria-hidden="true"></span>
+        <span><b>Active</b><small x-text="form.is_active ? 'Shows up when you make a sale or take a payment.' : 'Hidden from new sales. History is kept.'"></small></span>
+      </label>
+      <p class="modal-err" x-show="formError" x-text="formError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="formOpen = false" :disabled="formSaving">Cancel</button>
+        <button type="submit" class="btn btn-primary" :disabled="formSaving" x-text="formSaving ? 'Saving…' : (form.id ? 'Save changes' : 'Add customer')"></button>
+      </div>
+    </form>
+  </div>
+
+  <div class="modal-wrap" x-show="confirmDel" x-cloak x-transition.opacity.duration.120ms @click.self="confirmDel = false" role="dialog" aria-modal="true">
+    <div class="modal">
+      <div class="modal-icon">{% icon "trash" 22 %}</div>
+      <h2>Delete <span x-text="sel && sel.name"></span>?</h2>
+      <p x-text="sel && Number(sel.total_sales) > 0
+          ? 'This customer has sales history, so they will be marked inactive instead of deleted. Their invoices and receipts stay as they are.'
+          : 'This customer has no sales or payments, so they will be removed completely.'"></p>
+      <p class="modal-err" x-show="delError" x-text="delError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="confirmDel = false" :disabled="deleting">Keep</button>
+        <button type="button" class="btn btn-danger" @click="remove()" :disabled="deleting"
+                x-text="deleting ? 'Working…' : (sel && Number(sel.total_sales) > 0 ? 'Mark inactive' : 'Delete')"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" x-show="toast" x-cloak x-transition.opacity role="status" x-text="toast"></div>
+</div>
+{% endblock %}

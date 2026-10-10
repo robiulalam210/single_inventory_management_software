@@ -1,0 +1,10 @@
+{% extends "web/base.html" %}
+{% load web_tags %}
+{% block content %}
+<section class="panel empty">
+  <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "lock" 28 %}</div>
+  <h2>You don't have access to {{ page_title }}</h2>
+  <p>Ask your shop admin to give your account permission for this module.</p>
+  <a class="btn btn-ghost" href="{% url 'web:home' %}">Back to dashboard</a>
+</section>
+{% endblock %}

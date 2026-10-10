@@ -1,0 +1,170 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/transfers.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  {% if can_create %}<a class="btn btn-primary top-act" href="{% url 'web:transfer_new' %}">{% icon "plus" 18 %}<span>New transfer</span></a>{% endif %}
+{% endblock %}
+{% block content %}
+{{ list_init|json_script:"tl-init" }}
+<div x-data="transferList(JSON.parse(document.getElementById('tl-init').textContent))"
+     @keydown.escape.window="confirm ? (confirm = null) : shut()">
+
+  <section class="panel filters">
+    <div class="f-row">
+      <label class="f-search">
+        {% icon "search" 18 %}
+        <input type="search" x-model="f.q" placeholder="Search transfer no. or description" aria-label="Search transfers">
+      </label>
+      <div class="seg seg-sm" role="tablist" aria-label="Period">
+        <template x-for="p in presets" :key="p.key">
+          <button type="button" :class="{ 'is-on': f.preset === p.key }" @click="setPreset(p.key)" x-text="p.label"></button>
+        </template>
+      </div>
+    </div>
+    <div class="f-row" x-show="f.preset === 'custom'" x-cloak>
+      <label class="f-date"><span>From</span><input type="date" x-model="f.d1" @change="applyCustom()"></label>
+      <label class="f-date"><span>To</span><input type="date" x-model="f.d2" @change="applyCustom()"></label>
+    </div>
+    <div class="f-row">
+      <div class="chips" role="radiogroup" aria-label="Status">
+        <template x-for="t in statuses" :key="t.key">
+          <button type="button" class="chip" role="radio" :aria-checked="(f.status === t.key).toString()"
+                  :class="{ 'is-on': f.status === t.key }" @click="f.status = t.key" x-text="t.label"></button>
+        </template>
+      </div>
+      <div class="f-combos">
+        {% include "web/_combo.html" with model="f.from" source="accounts" placeholder="From any account" icon="wallet" %}
+        {% include "web/_combo.html" with model="f.to" source="accounts" placeholder="To any account" icon="wallet" %}
+        {% include "web/_combo.html" with model="f.type" source="typeOpts" placeholder="Any type" icon="transfer" %}
+        <label class="check"><input type="checkbox" x-model="f.reversal"><span>Reversals only</span></label>
+        <button type="button" class="btn-link" x-show="filtered" x-cloak @click="clearAll()">{% icon "filter-x" 16 %} Reset</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <template x-if="error">
+      <div class="empty">
+        <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2>Couldn't load transfers</h2>
+        <p x-text="error"></p>
+        <button class="btn btn-ghost" @click="fetch()">Try again</button>
+      </div>
+    </template>
+
+    <template x-if="!error">
+      <div>
+        <table class="dt" :class="{ 'is-loading': loading }">
+          <thead><tr><th>Transfer</th><th>From</th><th>To</th><th class="num">Amount</th><th>Status</th><th class="hide-md">Type</th><th></th></tr></thead>
+          <tbody>
+            <template x-for="t in rows" :key="t.id">
+              <tr tabindex="0" @click="open(t)" @keydown.enter="open(t)" :aria-label="'Open transfer ' + t.transfer_no">
+                <td data-k="Transfer"><b class="inv" x-text="t.transfer_no || ('#' + t.id)"></b>
+                  <span class="sub"><span x-text="date(t.transfer_date)"></span><span x-show="t.is_reversal"> · Reversal</span></span></td>
+                <td data-k="From" x-text="acc(t.from_account)"></td>
+                <td data-k="To" x-text="acc(t.to_account)"></td>
+                <td class="num" data-k="Amount"><b x-text="taka(t.amount)"></b></td>
+                <td data-k="Status"><span class="tag" :class="'tg-' + status(t)" x-text="cap(t.status)"></span></td>
+                <td class="hide-md" data-k="Type"><span class="tag" :class="'tg-' + t.transfer_type" x-text="cap(t.transfer_type)"></span></td>
+                <td @click.stop>
+                  <div class="row-acts">
+                    <button type="button" class="btn btn-ghost btn-sm" x-show="canExecute(t)" @click="ask('execute', t)">Execute</button>
+                    <button type="button" class="btn btn-ghost btn-sm" x-show="canReverse(t)" @click="ask('reverse', t)">Reverse</button>
+                    <button type="button" class="icon-btn danger" x-show="canCancel(t)" @click="ask('cancel', t)" aria-label="Cancel transfer" title="Cancel">{% icon "x" 18 %}</button>
+                  </div>
+                </td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !rows.length ? 6 : 0)" :key="'sk' + i">
+              <tr class="sk-row"><td colspan="7"><span class="sk-line"></span></td></tr>
+            </template>
+          </tbody>
+        </table>
+
+        <template x-if="!loading && !rows.length">
+          <div class="empty">
+            <div class="tile">{% icon "transfer" 26 %}</div>
+            <h2 x-text="filtered ? 'No transfers match these filters' : 'No transfers yet'"></h2>
+            <p x-text="filtered ? 'Try a wider date range or clear the filters.' : 'Money you move between accounts will appear here.'"></p>
+            <button class="btn btn-ghost" x-show="filtered" @click="clearAll()">Reset filters</button>
+            {% if can_create %}<a class="btn btn-primary" x-show="!filtered" href="{% url 'web:transfer_new' %}">{% icon "plus" 18 %} New transfer</a>{% endif %}
+          </div>
+        </template>
+
+        <nav class="pager" x-show="meta.count > 0" aria-label="Pages">
+          <span class="pager-info" x-text="`Showing ${from}–${to} of ${num(meta.count)}`"></span>
+          <div class="pager-btns" x-show="meta.total_pages > 1">
+            <button type="button" class="icon-btn" :disabled="page <= 1" @click="go(page - 1)" aria-label="Previous page">{% icon "chevron-left" 18 %}</button>
+            <template x-for="(p, i) in pages" :key="i + '-' + p">
+              <button type="button" class="pg" :class="{ 'is-on': p === page }" :disabled="p === '…'" @click="go(p)" x-text="p"></button>
+            </template>
+            <button type="button" class="icon-btn" :disabled="page >= meta.total_pages" @click="go(page + 1)" aria-label="Next page">{% icon "chevron-right" 18 %}</button>
+          </div>
+        </nav>
+      </div>
+    </template>
+  </section>
+
+  {# ───── detail drawer ───── #}
+  <div class="drawer-wrap" x-show="sel" x-cloak x-transition.opacity.duration.150ms @click.self="shut()">
+    <aside class="drawer" role="dialog" aria-modal="true" aria-label="Transfer" x-show="sel"
+           x-transition:enter="drawer-in" x-transition:enter-start="drawer-from" x-transition:enter-end="drawer-to">
+      <template x-if="sel">
+        <div class="drawer-body">
+          <header class="drawer-head no-print">
+            <div>
+              <h2 x-text="sel.transfer_no || ('#' + sel.id)"></h2>
+              <span class="tag" :class="'tg-' + status(sel)" x-text="cap(sel.status)"></span>
+              <span class="tag" :class="'tg-' + sel.transfer_type" x-text="cap(sel.transfer_type)"></span>
+            </div>
+            <div class="drawer-actions">
+              <button type="button" class="btn btn-primary" x-show="canExecute(sel)" @click="ask('execute', sel)">Execute</button>
+              <button type="button" class="btn btn-ghost" x-show="canReverse(sel)" @click="ask('reverse', sel)">Reverse</button>
+              <button type="button" class="btn btn-ghost" x-show="canCancel(sel)" @click="ask('cancel', sel)">Cancel</button>
+              <button type="button" class="icon-btn" @click="shut()" aria-label="Close">{% icon "x" 18 %}</button>
+            </div>
+          </header>
+          <div class="mr-amount">
+            <span>Amount</span>
+            <b x-text="taka(sel.amount)"></b>
+          </div>
+          <dl class="mr-facts">
+            <div><dt>From</dt><dd x-text="acc(sel.from_account)"></dd></div>
+            <div><dt>To</dt><dd x-text="acc(sel.to_account)"></dd></div>
+            <div><dt>Transfer date</dt><dd x-text="date(sel.transfer_date)"></dd></div>
+            <div x-show="sel.is_reversal"><dt>Kind</dt><dd>Reversal of an earlier transfer</dd></div>
+            <div x-show="sel.reference_no"><dt>Reference no.</dt><dd x-text="sel.reference_no"></dd></div>
+            <div x-show="sel.description"><dt>Description</dt><dd x-text="sel.description"></dd></div>
+            <div x-show="sel.remarks"><dt>Remarks</dt><dd x-text="sel.remarks"></dd></div>
+            <div x-show="sel.created_by_name"><dt>Created by</dt><dd x-text="sel.created_by_name + (sel.created_at ? ', ' + dateTime(sel.created_at) : '')"></dd></div>
+            <div x-show="sel.approved_by_name"><dt>Executed by</dt><dd x-text="sel.approved_by_name"></dd></div>
+          </dl>
+        </div>
+      </template>
+    </aside>
+  </div>
+
+  {# ───── confirm ───── #}
+  <div class="modal-wrap" x-show="confirm" x-cloak x-transition.opacity.duration.120ms @click.self="confirm = null"
+       role="dialog" aria-modal="true" aria-labelledby="tl-confirm-title">
+    <div class="modal" x-show="confirm">
+      <div class="modal-icon">{% icon "transfer" 22 %}</div>
+      <h2 id="tl-confirm-title" x-text="confirmText && confirmText.title"></h2>
+      <p x-text="confirmText && confirmText.body"></p>
+      <div class="fld" x-show="confirmText && confirmText.reason">
+        <label class="fld-label" for="tl-reason">Reason <small>(optional)</small></label>
+        <textarea id="tl-reason" class="in" rows="2" maxlength="300" x-model="reason"></textarea>
+      </div>
+      <p class="modal-err" x-show="confirmError" x-text="confirmError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="confirm = null" :disabled="working">Back</button>
+        <button type="button" class="btn" :class="confirmText && confirmText.danger ? 'btn-danger' : 'btn-primary'" @click="runConfirm()" :disabled="working">
+          <span x-text="working ? 'Please wait…' : (confirmText && confirmText.btn)"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" x-show="toast" x-cloak x-transition.opacity role="status" x-text="toast"></div>
+</div>
+{% endblock %}

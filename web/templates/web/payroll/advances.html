@@ -1,0 +1,94 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/payroll.js' %}"></script>{% endblock %}
+{% block content %}
+<div x-data="advanceList()" @keydown.escape.window="formOpen = false; confirm = null">
+
+  <section class="panel filters">
+    <div class="f-row">
+      <div class="rp-pick"><span>Staff</span>{% include "web/_combo.html" with model="filter" source="staff" placeholder="Everyone" icon="users" %}</div>
+      <button type="button" class="chip" :class="{ 'is-on': openOnly }" role="switch" :aria-checked="openOnly.toString()" @click="openOnly = !openOnly">Still owed only</button>
+      <span style="flex:1"></span>
+      <button type="button" class="btn btn-primary" @click="openForm()">{% icon "plus" 16 %} Give advance</button>
+    </div>
+  </section>
+
+  <div class="sumbar sb-3">
+    <div><span>Advance still owed</span><b class="txt-due" x-text="taka(totalOwed)"></b></div>
+    <div><span>Staff who owe</span><b x-text="staffOwing"></b></div>
+    <div><span>Listed advances</span><b x-text="taka(shown)"></b></div>
+  </div>
+
+  <section class="panel">
+    <template x-if="error">
+      <div class="empty"><div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2>Couldn't load advances</h2><p x-text="error"></p><button class="btn btn-ghost" @click="fetch()">Try again</button></div>
+    </template>
+    <template x-if="!error">
+      <div>
+        <table class="dt" :class="{ 'is-loading': loading }">
+          <thead><tr><th>Staff</th><th>Date</th><th class="num">Amount</th><th class="num">Cut so far</th><th class="num">Still owed</th><th class="hide-md">Paid from</th><th></th></tr></thead>
+          <tbody>
+            <template x-for="r in rows" :key="r.id">
+              <tr>
+                <td data-k="Staff"><b x-text="r.staff_name"></b><span class="sub" x-text="r.note"></span></td>
+                <td data-k="Date" x-text="fmtDate(r.date)"></td>
+                <td class="num" data-k="Amount" x-text="taka(r.amount)"></td>
+                <td class="num" data-k="Cut so far" x-text="taka(r.deducted)"></td>
+                <td class="num" data-k="Still owed"><b :class="n(r.remaining) > 0 ? 'txt-due' : ''" x-text="taka(r.remaining)"></b></td>
+                <td class="hide-md" data-k="Paid from" x-text="(r.account_name || '—')"></td>
+                <td class="row-acts"><button type="button" class="icon-btn" x-show="n(r.deducted) === 0" @click="confirm = r" aria-label="Cancel advance">{% icon "trash" 17 %}</button></td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !rows.length ? 4 : 0)" :key="'sk' + i"><tr class="sk-row"><td colspan="7"><span class="sk-line"></span></td></tr></template>
+          </tbody>
+        </table>
+        <template x-if="!loading && !rows.length">
+          <div class="empty"><div class="tile">{% icon "wallet" 26 %}</div><h2>No advances</h2><p>Money you give a staff member before payday is recorded here and cut from their next salary.</p></div>
+        </template>
+      </div>
+    </template>
+  </section>
+
+  <div class="modal-wrap" x-show="formOpen" x-cloak x-transition.opacity.duration.120ms @click.self="formOpen = false" role="dialog" aria-modal="true" aria-label="Give advance">
+    <div class="modal" x-show="formOpen" style="max-width:480px">
+      <template x-if="form">
+        <form @submit.prevent="save()" novalidate>
+          <h2>Give an advance</h2>
+          <div class="fld"><label class="fld-label">Staff <i>*</i></label>
+            {% include "web/_combo.html" with model="form.staff" source="staff" placeholder="Choose staff" icon="users" noclear=1 %}
+            <p class="fld-hint" x-show="form.staff && balances[form.staff] !== undefined">Already owes <b x-text="taka(balances[form.staff])"></b></p></div>
+          <div class="fld"><label class="fld-label">Amount <i>*</i></label><div class="money-in"><span>৳</span><input type="text" inputmode="decimal" placeholder="0.00" x-model="form.amount" @input="form.amount = form.amount.replace(/[^0-9.]/g, '')"></div></div>
+          <div class="fld"><label class="fld-label">Paid from account <i>*</i></label>
+            {% include "web/_combo.html" with model="form.account" source="accounts" placeholder="Choose account" icon="wallet" noclear=1 %}
+            <p class="tr-bal" :class="{ 'is-short': short }" x-show="accBalance(form.account) !== null">Balance <b x-text="taka(accBalance(form.account))"></b></p></div>
+          <div class="fld-row">
+            <div class="fld"><label class="fld-label">Method</label><select class="in" x-model="form.method"><template x-for="m in methods" :key="m[0]"><option :value="m[0]" x-text="m[1]"></option></template></select></div>
+            <div class="fld"><label class="fld-label">Date</label><input class="in" type="date" x-model="form.date"></div>
+          </div>
+          <div class="fld"><label class="fld-label">Note</label><input class="in" type="text" maxlength="255" x-model="form.note"></div>
+          <p class="modal-err" x-show="formErr" x-text="formErr"></p>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" @click="formOpen = false" :disabled="working">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="working"><span x-text="working ? 'Saving…' : 'Give advance'"></span></button>
+          </div>
+        </form>
+      </template>
+    </div>
+  </div>
+
+  <div class="modal-wrap" x-show="confirm" x-cloak x-transition.opacity.duration.120ms @click.self="confirm = null" role="dialog" aria-modal="true">
+    <div class="modal" x-show="confirm">
+      <h2>Cancel this advance?</h2>
+      <p x-text="confirm ? taka(confirm.amount) + ' given to ' + confirm.staff_name + ' goes back to the account.' : ''"></p>
+      <p class="modal-err" x-show="confirmErr" x-text="confirmErr"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="confirm = null" :disabled="working">Keep it</button>
+        <button type="button" class="btn btn-danger" @click="runConfirm()" :disabled="working"><span x-text="working ? 'Please wait…' : 'Cancel advance'"></span></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" x-show="toast" x-cloak x-transition.opacity role="status" x-text="toast"></div>
+</div>
+{% endblock %}

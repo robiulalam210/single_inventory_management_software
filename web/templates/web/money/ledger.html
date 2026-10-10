@@ -1,0 +1,226 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/ledger.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  {% if lg.perms.create %}<button type="button" class="btn btn-primary top-act" onclick="window.dispatchEvent(new CustomEvent('ledger-new'))">{% icon "plus" 18 %}<span>New {{ lg.noun }}</span></button>{% endif %}
+{% endblock %}
+{% block content %}
+{{ lg|json_script:"lg-cfg" }}
+{{ web_company.name|json_script:"lg-co" }}
+<div x-data="ledgerPage(JSON.parse(document.getElementById('lg-cfg').textContent))" @ledger-new.window="openForm(null)" @keydown.escape.window="escape()"
+     class="lg" :class="isExp ? 'lg-exp' : 'lg-inc'">
+
+  <section class="panel filters">
+    <div class="f-row">
+      <div class="seg seg-sm" role="tablist" aria-label="Period">
+        <template x-for="p in presets" :key="p.key">
+          <button type="button" :class="{ 'is-on': f.preset === p.key }" @click="setRange(p.key)" x-text="p.label"></button>
+        </template>
+      </div>
+      <template x-if="f.preset === 'custom'">
+        <div class="lg-dates">
+          <label class="f-date"><span>From</span><input type="date" x-model="f.from" @change="page = 1; load()"></label>
+          <label class="f-date"><span>To</span><input type="date" x-model="f.to" @change="page = 1; load()"></label>
+        </div>
+      </template>
+    </div>
+    <div class="f-row">
+      <label class="f-search">{% icon "search" 18 %}
+        <input type="search" x-model="f.q" :placeholder="'Search note, ' + cfg.ref_label + ', head or amount'" aria-label="Search"></label>
+      <select class="in lg-acc" x-model="f.account" @change="setAccount(f.account)" aria-label="Account">
+        <option value="">All accounts</option>
+        <template x-for="a in accounts" :key="a.id"><option :value="String(a.id)" x-text="a.name" :selected="String(a.id) === f.account"></option></template>
+      </select>
+      <button type="button" class="btn-link" x-show="filtered" x-cloak @click="clearAll()">{% icon "filter-x" 16 %} Reset</button>
+    </div>
+  </section>
+
+  {# ───────────── summary ───────────── #}
+  <section class="panel lg-sum" aria-live="polite">
+    <div class="lg-total">
+      <span x-text="(isExp ? 'Spent' : 'Received') + ' · ' + rangeText"></span>
+      <b :class="isExp ? 'txt-due' : 'txt-ok'" x-text="sum ? taka(sum.total) : '—'"></b>
+      <small><span x-text="sum ? sum.count + (sum.count === 1 ? ' entry' : ' entries') : ''"></span>
+        <span class="lg-perday" x-show="perDay !== null && sum && sum.count" x-text="'About ' + taka(perDay) + ' a day'"></span></small>
+    </div>
+    <div class="lg-bars" x-show="headBars.length">
+      <template x-for="h in headBars" :key="h.id || 'none'">
+        <button type="button" class="lg-bar" :class="{ 'is-on': f.head === String(h.id) }" @click="h.id && setHead(h.id)" :title="'Show only ' + h.name">
+          <span class="lg-bar-l" x-text="h.name"></span>
+          <i><em :style="'width:' + h.pct + '%'"></em></i>
+          <span class="lg-bar-v"><b x-text="taka(h.total)"></b><small x-text="h.share + '%'"></small></span>
+        </button>
+      </template>
+    </div>
+    <p class="lg-empty-sum" x-show="sum && !sum.count" x-text="'No ' + cfg.plural + ' in this period.'"></p>
+  </section>
+
+  <section class="panel">
+    <template x-if="error">
+      <div class="empty">
+        <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2 x-text="'Couldn\'t load ' + cfg.plural"></h2><p x-text="error"></p>
+        <button class="btn btn-ghost" @click="load()">Try again</button>
+      </div>
+    </template>
+    <template x-if="!error">
+      <div>
+        <table class="dt lg-table" :class="{ 'is-loading': loading }">
+          <thead><tr><th>Date</th><th>For</th><th class="hide-md">Note</th><th class="hide-md">Account</th><th class="num">Amount</th></tr></thead>
+          <tbody>
+            <template x-for="r in rows" :key="r.id">
+              <tr tabindex="0" @click="open(r)" @keydown.enter="open(r)" :aria-label="'Open ' + r.invoice_number">
+                <td data-k="Invoice"><span x-text="date(isExp ? r.expense_date : r.income_date)"></span><span class="sub inv" x-text="r.invoice_number"></span></td>
+                <td data-k="Customer"><b x-text="headName(r)"></b><span class="sub" x-show="sub(r)" x-text="sub(r)"></span></td>
+                <td class="hide-md lg-note" data-k="Note" x-text="r.note || '—'"></td>
+                <td class="hide-md" data-k="Account" x-text="r.account_name || '—'"></td>
+                <td class="num" data-k="Total"><b :class="isExp ? 'txt-due' : 'txt-ok'" x-text="(isExp ? '−' : '+') + taka(r.amount)"></b></td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !rows.length ? 6 : 0)" :key="'sk' + i">
+              <tr class="sk"><td><span class="sk-line" style="width:60%"></span></td><td><span class="sk-line" style="width:50%"></span></td><td class="hide-md"><span class="sk-line"></span></td><td class="hide-md"></td><td></td></tr>
+            </template>
+          </tbody>
+        </table>
+        <div class="empty" x-show="!loading && !rows.length" x-cloak>
+          <div class="tile">{% icon lg.icon 26 %}</div>
+          <h2 x-text="filtered ? 'Nothing matches' : 'No ' + cfg.plural + ' this month'"></h2>
+          <p x-text="filtered ? 'Try another period, search or account.' : cfg.empty_text"></p>
+          <template x-if="perms.create && !filtered"><button class="btn btn-primary" @click="openForm(null)">{% icon "plus" 18 %} <span x-text="'New ' + cfg.noun"></span></button></template>
+        </div>
+        <div class="pager" x-show="count > 25" x-cloak>
+          <span x-text="fromRow + '–' + toRow + ' of ' + count"></span>
+          <button type="button" class="icon-btn" @click="go(page - 1)" :disabled="page <= 1" aria-label="Previous page">{% icon "chevron-left" 18 %}</button>
+          <button type="button" class="icon-btn" @click="go(page + 1)" :disabled="page >= pages" aria-label="Next page">{% icon "chevron-right" 18 %}</button>
+        </div>
+      </div>
+    </template>
+  </section>
+
+  {# ───────────── detail drawer ───────────── #}
+  <div class="drawer-wrap" x-show="sel" x-cloak x-transition.opacity.duration.150ms @click.self="shut()">
+    <aside class="drawer" role="dialog" aria-modal="true" :aria-label="cfg.noun" x-show="sel"
+           x-transition:enter="drawer-in" x-transition:enter-start="drawer-from" x-transition:enter-end="drawer-to">
+      <template x-if="sel">
+        <div class="drawer-body">
+          <header class="drawer-head no-print">
+            <div><h2 x-text="sel.invoice_number"></h2></div>
+            <div class="drawer-actions">
+              <template x-if="perms.delete"><button type="button" class="icon-btn danger" @click="confirmDel = true; delError = ''" aria-label="Delete" title="Delete">{% icon "trash" 18 %}</button></template>
+              <template x-if="perms.edit"><button type="button" class="btn btn-ghost" @click="openForm(sel)">{% icon "pencil" 16 %} <span>Edit</span></button></template>
+              <button type="button" class="btn btn-ghost" @click="print()">{% icon "printer" 18 %} <span>Print</span></button>
+              <button type="button" class="icon-btn" @click="shut()" aria-label="Close">{% icon "x" 18 %}</button>
+            </div>
+          </header>
+          <div class="lg-voucher print-area">
+            <div class="inv-top">
+              <div><b class="inv-co" x-text="JSON.parse(document.getElementById('lg-co').textContent)"></b><span x-text="isExp ? 'Expense voucher' : 'Income receipt'"></span></div>
+              <div class="inv-meta"><b x-text="sel.invoice_number"></b><span x-text="date(selDate)"></span></div>
+            </div>
+            <div class="lg-amt" :class="isExp ? 'is-out' : 'is-in'">
+              <span x-text="isExp ? 'Paid' : 'Received'"></span>
+              <b x-text="taka(sel.amount)"></b>
+              <small x-text="App.takaWords ? App.takaWords(sel.amount) : ''"></small>
+            </div>
+            <dl class="pf-kv lg-kv">
+              <div><dt x-text="isExp ? 'Expense head' : 'Income head'"></dt><dd><span x-text="sel.head_name || '—'"></span><span x-show="sel.subhead_name" x-text="' › ' + sel.subhead_name"></span></dd></div>
+              <div><dt x-text="isExp ? 'Paid from' : 'Received into'"></dt><dd x-text="sel.account_name || '—'"></dd></div>
+              <div><dt>Date</dt><dd x-text="date(selDate)"></dd></div>
+              <div><dt>Recorded by</dt><dd x-text="sel.created_by_name || '—'"></dd></div>
+              <div class="lg-kv-wide" x-show="sel.note"><dt>Note</dt><dd x-text="sel.note"></dd></div>
+            </dl>
+            <div class="lg-sign"><span>Received by</span><span>Approved by</span></div>
+          </div>
+          <div class="lg-txn no-print" x-show="(sel.transactions || []).length || (sel.expense_summary && sel.expense_summary.transaction_no)">
+            <h4>In the account</h4>
+            <template x-if="sel.transactions">
+              <ul><template x-for="t in sel.transactions" :key="t.id">
+                <li :class="{ 'is-void': t.status === 'cancelled' }"><span x-text="t.transaction_no"></span><span x-text="t.account"></span>
+                  <b :class="t.type === 'credit' ? 'txt-ok' : 'txt-due'" x-text="(t.type === 'credit' ? '+' : '−') + taka(t.amount)"></b>
+                  <small x-text="t.status === 'cancelled' ? 'replaced' : ''"></small></li>
+              </template></ul>
+            </template>
+            <template x-if="!sel.transactions && sel.expense_summary">
+              <ul><li><span x-text="sel.expense_summary.transaction_no"></span><span x-text="sel.account_name"></span><b class="txt-due" x-text="'−' + taka(sel.amount)"></b><small></small></li></ul>
+            </template>
+          </div>
+          <div class="lg-del no-print" x-show="confirmDel" x-cloak>
+            <p><b>Delete <span x-text="sel.invoice_number"></span>?</b>
+              <span x-text="isExp ? taka(sel.amount) + ' goes back into ' + (sel.account_name || 'the account') + '.' : taka(sel.amount) + ' is taken back out of ' + (sel.account_name || 'the account') + '.'"></span>
+              Both steps stay visible on the account statement.</p>
+            <p class="modal-err" x-show="delError" x-text="delError"></p>
+            <div><button type="button" class="btn btn-ghost" @click="confirmDel = false" :disabled="deleting">Keep</button>
+              <button type="button" class="btn btn-danger" @click="remove()" :disabled="deleting" x-text="deleting ? 'Deleting…' : 'Delete'"></button></div>
+          </div>
+        </div>
+      </template>
+    </aside>
+  </div>
+
+  {# ───────────── add / edit ───────────── #}
+  <div class="modal-wrap" x-show="formOpen" x-cloak x-transition.opacity.duration.120ms @click.self="!saving && (formOpen = false)" role="dialog" aria-modal="true" aria-labelledby="lg-title">
+    <form class="modal modal-wide" @submit.prevent="save(false)" novalidate>
+      <h2 id="lg-title" x-text="form.id ? 'Edit ' + form.ref : 'New ' + cfg.noun"></h2>
+      <div class="lg-amount-in" :class="{ 'has-error': fe.amount }">
+        <label for="lg-amount" x-text="isExp ? 'How much was spent?' : 'How much came in?'"></label>
+        <div class="money-in"><span>৳</span><input id="lg-amount" x-ref="lgAmount" type="text" inputmode="decimal" x-model="form.amount" @input="fe.amount = ''; form.amount = form.amount.replace(/[^0-9.]/g, '')" placeholder="0.00"></div>
+        <p class="fld-err" x-show="fe.amount" x-text="fe.amount"></p>
+        <p class="fld-hint" x-show="!fe.amount && App.takaWords && Number(form.amount) > 0" x-text="App.takaWords ? App.takaWords(form.amount) : ''"></p>
+      </div>
+      <div class="fld" :class="{ 'has-error': fe.head }">
+        <label class="fld-label" for="lg-head"><span x-text="isExp ? 'Spent on' : 'Came from'"></span> <i>*</i></label>
+        <div class="lg-head-row" x-show="!form.addingHead">
+          <select id="lg-head" class="in" x-model="form.head" @change="headChanged()">
+            <option value="">Choose…</option>
+            <template x-for="h in activeHeads" :key="h.id"><option :value="String(h.id)" x-text="h.name" :selected="String(h.id) === form.head"></option></template>
+          </select>
+          <template x-if="cfg.can_add_head"><button type="button" class="btn btn-ghost" @click="form.addingHead = true; $nextTick(() => $refs.newHead.focus())">{% icon "plus" 16 %} New</button></template>
+        </div>
+        <div class="lg-head-row" x-show="form.addingHead" x-cloak>
+          <input class="in" x-ref="newHead" type="text" maxlength="255" x-model="form.newHead" @keydown.enter.prevent="addHead()" :placeholder="isExp ? 'e.g. Electricity bill' : 'e.g. Rent received'">
+          <button type="button" class="btn btn-primary" @click="addHead()">Add</button>
+          <button type="button" class="btn btn-ghost" @click="form.addingHead = false">Cancel</button>
+        </div>
+        <p class="fld-err" x-show="fe.head" x-text="fe.head"></p>
+      </div>
+      <div class="fld" x-show="isExp && form.head && subsForHead.length" x-cloak>
+        <label class="fld-label" for="lg-sub">Sub head</label>
+        <select id="lg-sub" class="in" x-model="form.subhead" @change="fe.subhead = ''">
+          <option value="">None</option>
+          <template x-for="s in subsForHead" :key="s.id"><option :value="String(s.id)" x-text="s.name" :selected="String(s.id) === form.subhead"></option></template>
+        </select>
+        <p class="fld-err" x-show="fe.subhead" x-text="fe.subhead"></p>
+      </div>
+      <div class="fld-row">
+        <div class="fld" :class="{ 'has-error': fe.account }">
+          <label class="fld-label" for="lg-acc"><span x-text="isExp ? 'Paid from' : 'Received into'"></span> <i>*</i></label>
+          <select id="lg-acc" class="in" x-model="form.account" @change="fe.account = ''; fe.amount = ''">
+            <template x-for="a in accounts" :key="a.id"><option :value="String(a.id)" x-text="a.name + ' — ' + taka(a.balance)" :selected="String(a.id) === form.account"></option></template>
+          </select>
+          <p class="fld-err" x-show="fe.account" x-text="fe.account"></p>
+          <p class="fld-hint" :class="{ warn: overBalance }" x-show="!fe.account && acct && isExp" x-text="'Available: ' + taka(available)"></p>
+        </div>
+        <div class="fld" :class="{ 'has-error': fe.date }">
+          <label class="fld-label" for="lg-date">Date <i>*</i></label>
+          <input id="lg-date" class="in" type="date" x-model="form.date" @change="fe.date = ''">
+          <p class="fld-err" x-show="fe.date" x-text="fe.date"></p>
+        </div>
+      </div>
+      <div class="fld">
+        <label class="fld-label" for="lg-note">Note</label>
+        <textarea id="lg-note" class="in" rows="2" x-model="form.note" :placeholder="isExp ? 'e.g. October bill, meter 2231' : 'e.g. Rent for the upstairs room'"></textarea>
+      </div>
+      <p class="fld-hint warn" x-show="form.id && (Number(form.amount) !== form.was_amount || String(form.account) !== String(form.was_account))" x-cloak>
+        The old amount is put back and the new one is recorded — both show on the account statement.</p>
+      <p class="modal-err" x-show="formError" x-text="formError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="formOpen = false" :disabled="saving">Cancel</button>
+        <button type="button" class="btn btn-ghost" x-show="!form.id" @click="save(true)" :disabled="saving">Save & add another</button>
+        <button type="submit" class="btn btn-primary" :disabled="saving" x-text="saving ? 'Saving…' : (form.id ? 'Save changes' : 'Save')"></button>
+      </div>
+    </form>
+  </div>
+
+  <div class="toast" x-show="toast" x-cloak x-transition.opacity role="status" x-text="toast"></div>
+</div>
+{% endblock %}

@@ -1,0 +1,8 @@
+<div class="img" @click="view = p"><template x-if="p.image"><img :src="p.image" :alt="p.name" loading="lazy"></template><template x-if="!p.image"><span x-text="p.name.slice(0,1).toUpperCase()" style="font-size:34px;font-weight:700"></span></template>
+  <span class="tag" x-show="p.off" x-text="'-' + p.off + '%'"></span><span class="tag new" x-show="!p.off && p.isNew">New</span>
+  <span class="low" x-show="p.stock <= 5" x-text="'Only ' + p.stock + ' left'"></span></div>
+<div class="b"><span class="meta" x-text="p.catName" x-show="p.catName"></span>
+  <h3 @click="view = p" x-text="p.name"></h3>
+  <div class="pr"><b x-text="money(p.price)"></b><s x-show="p.old" x-text="money(p.old)"></s></div>
+  <template x-if="!qtyOf(p.id)"><button class="add" @click="add(p)">Add to cart</button></template>
+  <template x-if="qtyOf(p.id)"><div class="qty"><button @click="dec(p)" aria-label="Less">&minus;</button><b x-text="qtyOf(p.id)"></b><button @click="add(p)" aria-label="More">+</button></div></template></div>

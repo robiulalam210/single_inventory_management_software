@@ -1,0 +1,61 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/payroll.js' %}"></script>{% endblock %}
+{% block content %}
+<div x-data="payrollReport()">
+  <section class="panel filters no-print">
+    <div class="f-row">
+      <div class="seg seg-sm" role="group" aria-label="Period">
+        <button type="button" @click="preset('month')">This month</button>
+        <button type="button" @click="preset('last')">Last month</button>
+        <button type="button" @click="preset('3m')">Last 3 months</button>
+        <button type="button" @click="preset('year')">This year</button>
+      </div>
+      <label class="f-date"><span>From</span><input type="month" x-model="start" @change="apply()"></label>
+      <label class="f-date"><span>To</span><input type="month" x-model="end" @change="apply()"></label>
+      <span style="flex:1"></span>
+      <button type="button" class="btn btn-ghost" @click="print()">{% icon "printer" 16 %} Print</button>
+      <button type="button" class="btn btn-ghost" @click="exportCsv()" :disabled="!rows.length">Download CSV</button>
+    </div>
+  </section>
+
+  <template x-if="error">
+    <section class="panel"><div class="empty"><div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+      <h2>Couldn't load the report</h2><p x-text="error"></p><button class="btn btn-ghost" @click="fetch()">Try again</button></div></section>
+  </template>
+
+  <div class="print-area" x-show="!error">
+    <div class="rp-head"><h2>{{ web_company.name }}</h2><p><b>Payroll Report</b> · <span x-text="periodText"></span></p></div>
+    <div class="rp-cards" x-show="summary">
+      <div><span>Net salary</span><b x-text="taka(summary && summary.net)"></b></div>
+      <div><span>Paid</span><b class="txt-ok" x-text="taka(summary && summary.paid)"></b></div>
+      <div><span>Still to pay</span><b class="txt-due" x-text="taka(summary && summary.unpaid)"></b></div>
+      <div><span>Advances given</span><b x-text="taka(summary && summary.advances_given)"></b></div>
+      <div><span>Staff</span><b x-text="summary && summary.staff"></b></div>
+    </div>
+    <section class="panel">
+      <table class="dt" :class="{ 'is-loading': loading }">
+        <thead><tr><th>Staff</th><th class="num">Months</th><th class="num hide-md">Basic</th><th class="num hide-md">Additions</th><th class="num hide-md">Deductions</th><th class="num">Net salary</th><th class="num">Paid</th><th class="num">Unpaid</th></tr></thead>
+        <tbody>
+          <template x-for="r in rows" :key="r.staff_id">
+            <tr>
+              <td data-k="Staff"><b x-text="r.staff_name"></b><span class="sub" x-text="r.designation"></span></td>
+              <td class="num" data-k="Months" x-text="r.months"></td>
+              <td class="num hide-md" x-text="taka(r.basic)"></td>
+              <td class="num hide-md" x-text="taka(r.additions)"></td>
+              <td class="num hide-md" x-text="taka(r.deductions)"></td>
+              <td class="num" data-k="Net salary"><b x-text="taka(r.net)"></b></td>
+              <td class="num" data-k="Paid"><span class="txt-ok" x-text="taka(r.paid)"></span></td>
+              <td class="num" data-k="Unpaid"><span :class="n(r.unpaid) > 0 ? 'txt-due' : ''" x-text="taka(r.unpaid)"></span></td>
+            </tr>
+          </template>
+          <template x-for="i in (loading && !rows.length ? 4 : 0)" :key="'sk' + i"><tr class="sk-row"><td colspan="8"><span class="sk-line"></span></td></tr></template>
+        </tbody>
+      </table>
+      <template x-if="!loading && !rows.length">
+        <div class="empty"><div class="tile">{% icon "chart" 26 %}</div><h2>No salary slips in this period</h2><p>Prepare salary from the Salary Sheet first.</p></div>
+      </template>
+    </section>
+  </div>
+</div>
+{% endblock %}

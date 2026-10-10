@@ -1,0 +1,94 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/returns.js' %}"></script>{% endblock %}
+{% block content %}
+<div x-data="badStockList()" @keydown.escape.window="sel = null">
+
+  <section class="panel filters">
+    <div class="f-row">
+      <label class="f-search">
+        {% icon "search" 18 %}
+        <input type="search" x-model="f.q" placeholder="Search product, reason or reference" aria-label="Search bad stock">
+      </label>
+      <label class="f-date"><span>From</span><input type="date" x-model="f.from" @change="applyDates()"></label>
+      <label class="f-date"><span>To</span><input type="date" x-model="f.to" @change="applyDates()"></label>
+      <button type="button" class="btn-link" x-show="filtered" x-cloak @click="clearAll()">{% icon "filter-x" 16 %} Reset</button>
+    </div>
+  </section>
+
+  <div class="sumbar" aria-live="polite">
+    <div><span>Records</span><b x-text="num(meta.count)"></b></div>
+    <div><span>Bad quantity on this page</span><b class="txt-due" x-text="num(totalQty)"></b></div>
+  </div>
+
+  <section class="panel">
+    <template x-if="error">
+      <div class="empty">
+        <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2>Couldn't load bad stock</h2>
+        <p x-text="error"></p>
+        <button class="btn btn-ghost" @click="fetch()">Try again</button>
+      </div>
+    </template>
+
+    <template x-if="!error">
+      <div>
+        <table class="dt" :class="{ 'is-loading': loading }">
+          <thead><tr><th>Product</th><th class="num">Quantity</th><th class="hide-md">Reason</th><th>Date</th><th>Reference</th></tr></thead>
+          <tbody>
+            <template x-for="r in rows" :key="r.id">
+              <tr tabindex="0" @click="sel = r" @keydown.enter="sel = r" :aria-label="'Open ' + r.product_name">
+                <td data-k="Product"><b x-text="r.product_name || ('Product #' + r.product)"></b></td>
+                <td class="num" data-k="Quantity"><b x-text="num(r.quantity)"></b></td>
+                <td class="hide-md" data-k="Reason" x-text="r.reason || '—'"></td>
+                <td data-k="Date" x-text="date(r.date)"></td>
+                <td data-k="Reference"><span class="tag" x-text="ref(r)"></span></td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !rows.length ? 6 : 0)" :key="'sk' + i">
+              <tr class="sk-row"><td colspan="5"><span class="sk-line"></span></td></tr>
+            </template>
+          </tbody>
+        </table>
+
+        <template x-if="!loading && !rows.length">
+          <div class="empty">
+            <div class="tile">{% icon "box" 26 %}</div>
+            <h2 x-text="filtered ? 'No bad stock matches these filters' : 'No bad stock recorded'"></h2>
+            <p x-text="filtered ? 'Try a wider date range or clear the search.' : 'Damaged goods from sales returns will appear here.'"></p>
+            <button class="btn btn-ghost" x-show="filtered" @click="clearAll()">Reset filters</button>
+          </div>
+        </template>
+
+        <nav class="pager" x-show="meta.count > 0" aria-label="Pages">
+          <span class="pager-info" x-text="`Showing ${from}–${to} of ${num(meta.count)}`"></span>
+          <div class="pager-btns" x-show="meta.total_pages > 1">
+            <button type="button" class="icon-btn" :disabled="page <= 1" @click="go(page - 1)" aria-label="Previous page">{% icon "chevron-left" 18 %}</button>
+            <template x-for="(p, i) in pages" :key="i + '-' + p">
+              <button type="button" class="pg" :class="{ 'is-on': p === page }" :disabled="p === '…'" @click="go(p)" x-text="p"></button>
+            </template>
+            <button type="button" class="icon-btn" :disabled="page >= meta.total_pages" @click="go(page + 1)" aria-label="Next page">{% icon "chevron-right" 18 %}</button>
+          </div>
+        </nav>
+      </div>
+    </template>
+  </section>
+
+  <div class="modal-wrap" x-show="sel" x-cloak x-transition.opacity.duration.120ms @click.self="sel = null" role="dialog" aria-modal="true" aria-label="Bad stock details">
+    <div class="modal" x-show="sel">
+      <template x-if="sel">
+        <div>
+          <h2 x-text="sel.product_name || ('Product #' + sel.product)"></h2>
+          <dl class="mr-facts">
+            <div><dt>Quantity</dt><dd x-text="num(sel.quantity)"></dd></div>
+            <div><dt>Date</dt><dd x-text="date(sel.date)"></dd></div>
+            <div><dt>Reference</dt><dd x-text="ref(sel)"></dd></div>
+            <div><dt>Reason</dt><dd x-text="sel.reason || 'No reason given'"></dd></div>
+          </dl>
+        </div>
+      </template>
+      <div class="modal-actions"><button type="button" class="btn btn-ghost" @click="sel = null">Close</button></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

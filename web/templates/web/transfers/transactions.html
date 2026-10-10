@@ -1,0 +1,125 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/transfers.js' %}"></script>{% endblock %}
+{% block content %}
+<div x-data="txnList()" @keydown.escape.window="sel = null">
+
+  <section class="panel filters">
+    <div class="f-row">
+      <label class="f-search">
+        {% icon "search" 18 %}
+        <input type="search" x-model="f.q" placeholder="Search transaction no., description or account" aria-label="Search transactions">
+      </label>
+      <div class="seg seg-sm" role="tablist" aria-label="Period">
+        <template x-for="p in presets" :key="p.key">
+          <button type="button" :class="{ 'is-on': f.preset === p.key }" @click="setPreset(p.key)" x-text="p.label"></button>
+        </template>
+      </div>
+    </div>
+    <div class="f-row" x-show="f.preset === 'custom'" x-cloak>
+      <label class="f-date"><span>From</span><input type="date" x-model="f.d1" @change="applyCustom()"></label>
+      <label class="f-date"><span>To</span><input type="date" x-model="f.d2" @change="applyCustom()"></label>
+    </div>
+    <div class="f-row">
+      <div class="chips" role="radiogroup" aria-label="Type">
+        <template x-for="t in types" :key="t.key">
+          <button type="button" class="chip" role="radio" :aria-checked="(f.type === t.key).toString()"
+                  :class="{ 'is-on': f.type === t.key }" @click="f.type = t.key" x-text="t.label"></button>
+        </template>
+      </div>
+      <div class="f-combos">
+        {% include "web/_combo.html" with model="f.account" source="accounts" placeholder="All accounts" icon="wallet" %}
+        <select class="in" x-model="f.status" aria-label="Status">
+          <template x-for="s in statuses" :key="s.key"><option :value="s.key" x-text="s.label"></option></template>
+        </select>
+        <button type="button" class="btn-link" x-show="filtered" x-cloak @click="clearAll()">{% icon "filter-x" 16 %} Reset</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="sumbar sb-3" aria-live="polite">
+    <div><span>Transactions</span><b x-text="num(meta.count)"></b></div>
+    <div><span>Money in (this page)</span><b class="txt-ok" x-text="taka(credit)"></b></div>
+    <div><span>Money out (this page)</span><b class="txt-due" x-text="taka(debit)"></b></div>
+  </div>
+
+  <section class="panel">
+    <template x-if="error">
+      <div class="empty">
+        <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2>Couldn't load transactions</h2>
+        <p x-text="error"></p>
+        <button class="btn btn-ghost" @click="fetch()">Try again</button>
+      </div>
+    </template>
+
+    <template x-if="!error">
+      <div>
+        <table class="dt" :class="{ 'is-loading': loading }">
+          <thead><tr><th>Transaction</th><th>Account</th><th>Type</th><th class="num">Amount</th><th class="hide-md">Description</th><th>Status</th></tr></thead>
+          <tbody>
+            <template x-for="r in rows" :key="r.id">
+              <tr tabindex="0" @click="sel = r" @keydown.enter="sel = r" :aria-label="'Open ' + r.transaction_no">
+                <td data-k="Transaction"><b class="inv" x-text="r.transaction_no"></b><span class="sub" x-text="dateTime(r.transaction_date)"></span></td>
+                <td data-k="Account" x-text="r.account_name || '—'"></td>
+                <td data-k="Type"><span class="tag" :class="'tg-' + r.transaction_type" x-text="cap(r.transaction_type)"></span></td>
+                <td class="num" data-k="Amount"><b x-text="taka(r.amount)"></b></td>
+                <td class="hide-md" data-k="Description"><span x-text="r.description || source(r) || '—'"></span></td>
+                <td data-k="Status"><span class="tag" :class="'tg-' + r.status" x-text="cap(r.status)"></span></td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !rows.length ? 6 : 0)" :key="'sk' + i">
+              <tr class="sk-row"><td colspan="6"><span class="sk-line"></span></td></tr>
+            </template>
+          </tbody>
+        </table>
+
+        <template x-if="!loading && !rows.length">
+          <div class="empty">
+            <div class="tile">{% icon "coins" 26 %}</div>
+            <h2 x-text="filtered ? 'No transactions match these filters' : 'No transactions this month yet'"></h2>
+            <p x-text="filtered ? 'Try a wider date range or clear the filters.' : 'Every sale, payment, expense and transfer leaves a line here.'"></p>
+            <button class="btn btn-ghost" x-show="filtered" @click="clearAll()">Reset filters</button>
+          </div>
+        </template>
+
+        <nav class="pager" x-show="meta.count > 0" aria-label="Pages">
+          <span class="pager-info" x-text="`Showing ${from}–${to} of ${num(meta.count)}`"></span>
+          <div class="pager-btns" x-show="meta.total_pages > 1">
+            <button type="button" class="icon-btn" :disabled="page <= 1" @click="go(page - 1)" aria-label="Previous page">{% icon "chevron-left" 18 %}</button>
+            <template x-for="(p, i) in pages" :key="i + '-' + p">
+              <button type="button" class="pg" :class="{ 'is-on': p === page }" :disabled="p === '…'" @click="go(p)" x-text="p"></button>
+            </template>
+            <button type="button" class="icon-btn" :disabled="page >= meta.total_pages" @click="go(page + 1)" aria-label="Next page">{% icon "chevron-right" 18 %}</button>
+          </div>
+        </nav>
+      </div>
+    </template>
+  </section>
+
+  <div class="modal-wrap" x-show="sel" x-cloak x-transition.opacity.duration.120ms @click.self="sel = null" role="dialog" aria-modal="true" aria-label="Transaction details">
+    <div class="modal" x-show="sel">
+      <template x-if="sel">
+        <div>
+          <h2 x-text="sel.transaction_no"></h2>
+          <p class="mr-done-amt" x-text="taka(sel.amount)"></p>
+          <dl class="mr-facts">
+            <div><dt>Account</dt><dd x-text="(sel.account_name || '—') + (sel.account_type ? ' (' + sel.account_type + ')' : '')"></dd></div>
+            <div><dt>Type</dt><dd x-text="cap(sel.transaction_type)"></dd></div>
+            <div><dt>Status</dt><dd x-text="cap(sel.status)"></dd></div>
+            <div><dt>Date</dt><dd x-text="dateTime(sel.transaction_date)"></dd></div>
+            <div x-show="sel.payment_method"><dt>Method</dt><dd x-text="cap(sel.payment_method)"></dd></div>
+            <div x-show="source(sel)"><dt>From</dt><dd x-text="source(sel)"></dd></div>
+            <div x-show="head(sel) !== '—'"><dt>Expense head</dt><dd x-text="head(sel)"></dd></div>
+            <div x-show="sel.reference_no"><dt>Reference no.</dt><dd x-text="sel.reference_no"></dd></div>
+            <div x-show="sel.cheque_no"><dt>Cheque no.</dt><dd x-text="sel.cheque_no"></dd></div>
+            <div x-show="sel.description"><dt>Description</dt><dd x-text="sel.description"></dd></div>
+            <div x-show="sel.created_by_name"><dt>Recorded by</dt><dd x-text="sel.created_by_name"></dd></div>
+          </dl>
+        </div>
+      </template>
+      <div class="modal-actions"><button type="button" class="btn btn-ghost" @click="sel = null">Close</button></div>
+    </div>
+  </div>
+</div>
+{% endblock %}

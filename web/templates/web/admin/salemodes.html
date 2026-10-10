@@ -1,0 +1,175 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/salemodes.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  {% if sm_perms.create %}<button type="button" class="btn btn-primary top-act" onclick="window.dispatchEvent(new CustomEvent('mode-new'))">{% icon "plus" 18 %}<span>New sale mode</span></button>{% endif %}
+{% endblock %}
+{% block content %}
+{{ sm_perms|json_script:"sm-perms" }}
+<div x-data="saleModes(JSON.parse(document.getElementById('sm-perms').textContent))"
+     @mode-new.window="openForm(null)" @keydown.escape.window="escape()">
+
+  <section class="panel sm-intro">
+    <div class="sm-intro-ic">{% icon "ruler" 22 %}</div>
+    <div>
+      <b>Sell the same product in different sizes</b>
+      <p>Stock is always counted in the product's own unit. A sale mode says how much one sale takes out —
+        sell rice by the <i>gram</i> or by the <i>bag</i>, eggs by the <i>piece</i> or by the <i>dozen</i>.</p>
+    </div>
+    <div class="sm-eg" aria-hidden="true">
+      <span><b>1 Dozen</b> = 12 Pieces</span>
+      <span><b>1 Gram</b> = 0.001 Kilogram</span>
+      <span><b>1 Bag</b> = 50 Kilogram</span>
+    </div>
+  </section>
+
+  <template x-if="error">
+    <section class="panel empty">
+      <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+      <h2>Couldn't load sale modes</h2><p x-text="error"></p>
+      <button class="btn btn-ghost" @click="load()">Try again</button>
+    </section>
+  </template>
+
+  <template x-if="!error && !loading && !units.length">
+    <section class="panel un-start">
+      <div class="tile">{% icon "ruler" 28 %}</div>
+      <h2>Add units first</h2>
+      <p>A sale mode is always built on a unit — Dozen on Pieces, Gram on Kilogram. Set up your units, then come back.</p>
+      <a class="btn btn-primary" href="{% url 'web:units' %}">Go to Units</a>
+    </section>
+  </template>
+
+  <template x-if="!error && (loading || units.length)">
+    <div>
+      <section class="panel filters" x-show="modes.length" x-cloak>
+        <div class="f-row">
+          <label class="f-search">{% icon "search" 18 %}
+            <input type="search" x-model="q" placeholder="Search name, code or unit" aria-label="Search sale modes"></label>
+          <div class="chips" role="radiogroup" aria-label="Show">
+            <template x-for="c in views" :key="c.key">
+              <button type="button" class="chip" role="radio" :aria-checked="(view === c.key).toString()"
+                      :class="{ 'is-on': view === c.key }" @click="view = c.key"><span x-text="c.label"></span><span class="chip-n" x-text="c.n"></span></button>
+            </template>
+          </div>
+        </div>
+      </section>
+
+      <template x-if="!loading && !modes.length">
+        <section class="panel un-start">
+          <div class="tile">{% icon "ruler" 28 %}</div>
+          <h2>No sale modes yet</h2>
+          <p>You only need these if you sell something in more than one size. Everything else sells in its own unit as it is.</p>
+          <template x-if="perms.create"><button type="button" class="btn btn-primary" @click="openForm(null)">{% icon "plus" 18 %} New sale mode</button></template>
+        </section>
+      </template>
+
+      <div class="sm-groups">
+        <template x-for="g in groups" :key="g.id">
+          <section class="panel sm-group">
+            <header class="sm-group-h">
+              <div><span class="sm-base">Stock in</span><b x-text="g.unit.name"></b><code class="un-code" x-show="g.unit.code" x-text="g.unit.code"></code></div>
+              <template x-if="perms.create"><button type="button" class="btn-link" @click="openForm(null, g.id)">{% icon "plus" 15 %} Add size</button></template>
+            </header>
+            <ul class="sm-list">
+              <template x-for="m in g.modes" :key="m.id">
+                <li :class="{ 'is-off': m.is_active === false, 'is-click': perms.edit }" @click="openForm(m)" :tabindex="perms.edit ? 0 : -1" @keydown.enter="openForm(m)">
+                  <span class="sm-name"><b x-text="m.name"></b><code class="un-code" x-text="m.code"></code></span>
+                  <span class="sm-rule"><span x-text="rule(m)"></span><small x-show="inverse(m)" x-text="inverse(m)"></small></span>
+                  <span class="sm-meta"><span class="pill" :class="'sm-p-' + m.price_type" x-text="priceShort(m.price_type)"></span>
+                    <small x-text="usage(m)"></small></span>
+                  <span class="pill" :class="m.is_active === false ? 'st-off' : 'st-paid'" x-text="m.is_active === false ? 'Off' : 'Active'"></span>
+                  <span class="un-acts" @click.stop>
+                    <template x-if="perms.edit">
+                      <button type="button" class="icon-btn sm" @click="toggle(m)" :disabled="!!busy[m.id]" :aria-label="(m.is_active === false ? 'Activate ' : 'Deactivate ') + m.name"
+                              :title="m.is_active === false ? 'Activate' : 'Deactivate'"><span x-show="m.is_active !== false">{% icon "eye-dim" 16 %}</span><span x-show="m.is_active === false">{% icon "eye" 16 %}</span></button>
+                    </template>
+                    <template x-if="perms.delete"><button type="button" class="icon-btn sm danger" @click="askDelete(m)" :aria-label="'Delete ' + m.name" title="Delete">{% icon "trash" 16 %}</button></template>
+                  </span>
+                </li>
+              </template>
+            </ul>
+          </section>
+        </template>
+        <template x-for="i in (loading ? 2 : 0)" :key="'sk' + i">
+          <section class="panel sm-group"><span class="sk-line" style="width:30%"></span><span class="sk-line" style="margin-top:16px"></span><span class="sk-line" style="margin-top:12px;width:80%"></span></section>
+        </template>
+        <p class="rows-empty" x-show="!loading && modes.length && !groups.length" x-cloak x-text="q ? 'Nothing matches “' + q + '”.' : 'Nothing to show here.'"></p>
+      </div>
+      <p class="un-foot" x-show="!loading && modes.length" x-cloak>Prices for each size are set on the product itself. Turning a mode off hides it from sale screens; past sales keep it.</p>
+    </div>
+  </template>
+
+  {# ───────────── add / edit ───────────── #}
+  <div class="modal-wrap" x-show="formOpen" x-cloak x-transition.opacity.duration.120ms @click.self="formOpen = false" role="dialog" aria-modal="true" aria-labelledby="sm-title">
+    <form class="modal modal-wide" @submit.prevent="saveForm()" novalidate>
+      <h2 id="sm-title" x-text="form.id ? 'Edit ' + form.name : 'New sale mode'"></h2>
+      <div class="fld-row">
+        <div class="fld" :class="{ 'has-error': fe.name }"><label class="fld-label" for="sm-name">Name <i>*</i></label>
+          <input id="sm-name" x-ref="smName" class="in" type="text" maxlength="50" x-model="form.name" @input="nameInput()" placeholder="e.g. Dozen" autocomplete="off">
+          <p class="fld-err" x-show="fe.name" x-text="fe.name"></p></div>
+        <div class="fld" :class="{ 'has-error': fe.code }"><label class="fld-label" for="sm-code">Short code <i>*</i></label>
+          <input id="sm-code" class="in" type="text" maxlength="20" x-model="form.code" @input="form.codeTouched = true; fe.code = ''" placeholder="e.g. DZ" autocomplete="off" autocapitalize="characters">
+          <p class="fld-err" x-show="fe.code" x-text="fe.code"></p></div>
+      </div>
+      <div class="fld" :class="{ 'has-error': fe.base_unit }">
+        <label class="fld-label" for="sm-unit">Stock is counted in <i>*</i></label>
+        <select id="sm-unit" class="in" x-model="form.base_unit" @change="fe.base_unit = ''">
+          <template x-for="u in units" :key="u.id"><option :value="String(u.id)" x-text="u.name + (u.code ? ' (' + u.code + ')' : '') + (u.is_active === false ? ' — inactive' : '')" :selected="String(u.id) === form.base_unit"></option></template>
+        </select>
+        <p class="fld-err" x-show="fe.base_unit" x-text="fe.base_unit"></p>
+        <p class="fld-hint" x-show="!fe.base_unit">Use this mode only on products whose unit is <b x-text="baseName"></b>.</p>
+      </div>
+
+      <div class="fld" :class="{ 'has-error': fe.factor || precisionIssue }">
+        <label class="fld-label">How big is one <span x-text="modeName"></span>? <i>*</i></label>
+        <div class="sm-conv">
+          <div class="sm-eq"><span>1 <b x-text="modeName"></b> =</span>
+            <input class="in" type="text" inputmode="decimal" x-model="form.factor" @input="invEdit = false; factorInput()" placeholder="12" aria-label="Amount of base unit">
+            <span x-text="baseName"></span></div>
+          <div class="sm-or">or</div>
+          <div class="sm-eq"><span>1 <b x-text="baseName"></b> =</span>
+            <input class="in" type="text" inputmode="decimal" x-model="form.inv" @input="invEdit = true; invInput()" placeholder="1000" aria-label="Amount of this mode">
+            <span x-text="modeName"></span></div>
+        </div>
+        <p class="fld-err" x-show="fe.factor" x-text="fe.factor"></p>
+        <p class="fld-hint warn" x-show="!fe.factor && precisionIssue" x-text="precisionIssue"></p>
+        <p class="fld-hint" x-show="!fe.factor && !precisionIssue && sentence" x-text="sentence"></p>
+        <p class="fld-hint warn" x-show="form.id && form.sold && form.factor !== form.was" x-cloak>Past sales keep the old size; only new sales use the new one.</p>
+      </div>
+
+      <div class="fld">
+        <label class="fld-label">How is it priced?</label>
+        <div class="tm-rolepick sm-price" role="radiogroup">
+          <template x-for="(p, k) in priceTypes" :key="k">
+            <button type="button" role="radio" class="tm-role" :aria-checked="(form.price_type === k).toString()" :class="{ 'is-on': form.price_type === k }" @click="form.price_type = k">
+              <b x-text="p.label"></b><small x-text="p.note(modeName, baseName)"></small></button>
+          </template>
+        </div>
+      </div>
+      <p class="modal-err" x-show="formError" x-text="formError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="formOpen = false" :disabled="formSaving">Cancel</button>
+        <button type="submit" class="btn btn-primary" :disabled="formSaving" x-text="formSaving ? 'Saving…' : (form.id ? 'Save changes' : 'Add sale mode')"></button>
+      </div>
+    </form>
+  </div>
+
+  {# ───────────── delete ───────────── #}
+  <div class="modal-wrap" x-show="del" x-cloak x-transition.opacity.duration.120ms @click.self="del = null" role="dialog" aria-modal="true">
+    <div class="modal">
+      <div class="modal-icon">{% icon "trash" 22 %}</div>
+      <h2>Delete <span x-text="del && del.name"></span>?</h2>
+      <template x-if="del && inUse(del)"><p>It's used by <b x-text="usage(del)"></b>, so it can't be removed. It will be <b>turned off</b> instead — product prices and past sales stay as they are.</p></template>
+      <template x-if="del && !inUse(del)"><p>Nothing uses it yet. It will be removed for good.</p></template>
+      <p class="modal-err" x-show="delError" x-text="delError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="del = null" :disabled="deleting">Keep</button>
+        <button type="button" class="btn btn-danger" @click="remove()" :disabled="deleting" x-text="deleting ? 'Working…' : (del && inUse(del) ? 'Turn off' : 'Delete')"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" x-show="toast" x-cloak x-transition.opacity role="status" x-text="toast"></div>
+</div>
+{% endblock %}

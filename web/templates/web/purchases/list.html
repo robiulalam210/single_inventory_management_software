@@ -1,0 +1,235 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/purchases.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  {% if can_create %}<a class="btn btn-primary top-act" href="{% url 'web:purchase_new' %}">{% icon "plus" 18 %}<span>New purchase</span></a>{% endif %}
+{% endblock %}
+{% block content %}
+<div x-data="purchaseList({ canCancel: {{ can_cancel|yesno:'true,false' }} })"
+     @keydown.escape.window="confirmCancel ? (confirmCancel = false) : shut()">
+
+  {# ───────────── filters ───────────── #}
+  <section class="panel filters">
+    <div class="f-row">
+      <label class="f-search">
+        {% icon "search" 18 %}
+        <input type="search" x-model="f.q" placeholder="Search invoice no., supplier or note" aria-label="Search purchases">
+      </label>
+      <div class="seg seg-sm" role="tablist" aria-label="Period">
+        <template x-for="p in presets" :key="p.key">
+          <button type="button" :class="{ 'is-on': f.preset === p.key }" @click="setPreset(p.key)" x-text="p.label"></button>
+        </template>
+      </div>
+    </div>
+
+    <div class="f-row" x-show="f.preset === 'custom'" x-cloak>
+      <label class="f-date"><span>From</span><input type="date" x-model="f.from" @change="applyCustom()"></label>
+      <label class="f-date"><span>To</span><input type="date" x-model="f.to" @change="applyCustom()"></label>
+    </div>
+
+    <div class="f-row">
+      <div class="chips" role="radiogroup" aria-label="Payment status">
+        <template x-for="s in statuses" :key="s.key">
+          <button type="button" class="chip" role="radio" :aria-checked="(f.status === s.key).toString()"
+                  :class="{ 'is-on': f.status === s.key }" @click="f.status = s.key" x-text="s.label"></button>
+        </template>
+      </div>
+      <div class="f-combos">
+        {% include "web/_combo.html" with model="f.supplier" source="suppliers" placeholder="All suppliers" icon="truck" %}
+        <button type="button" class="btn-link" x-show="filtered" x-cloak @click="clearAll()">{% icon "filter-x" 16 %} Reset</button>
+      </div>
+    </div>
+  </section>
+
+  {# ───────────── totals ───────────── #}
+  <div class="sumbar" aria-live="polite">
+    <div><span>Invoices</span><b x-text="sum ? num(sum.total_purchases) : '—'"></b></div>
+    <div><span>Total bought</span><b x-text="sum ? taka(sum.total_amount) : '—'"></b></div>
+    <div><span>Paid to suppliers</span><b x-text="sum ? taka(sum.total_paid) : '—'"></b></div>
+    <div><span>Still to pay</span><b :class="{ 'txt-due': sum && sum.total_due > 0 }" x-text="sum ? taka(sum.total_due) : '—'"></b></div>
+    <div class="sum-period"><span>Period</span><b x-text="periodText"></b>
+      <small class="sum-note" x-show="sum && sum.cancelled_count && f.status !== 'cancelled'" x-cloak
+             x-text="sum && (sum.cancelled_count + ' cancelled not counted')"></small></div>
+  </div>
+
+  {# ───────────── list ───────────── #}
+  <section class="panel">
+    <template x-if="error">
+      <div class="empty">
+        <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2>Couldn't load purchases</h2>
+        <p x-text="error"></p>
+        <button class="btn btn-ghost" @click="fetch()">Try again</button>
+      </div>
+    </template>
+
+    <template x-if="!error">
+      <div>
+        <table class="dt" :class="{ 'is-loading': loading }">
+          <thead>
+            <tr>
+              <th>Invoice</th>
+              <th>Supplier</th>
+              <th class="num">Total</th>
+              <th class="num hide-md">Paid</th>
+              <th class="num">Due</th>
+              <th class="c">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in rows" :key="r.id">
+              <tr tabindex="0" @click="open(r)" @keydown.enter="open(r)" :aria-label="'Open purchase ' + r.invoice_no"
+                  :class="{ 'is-void': r.payment_status === 'cancelled' }">
+                <td data-k="Invoice">
+                  <b class="inv" x-text="r.invoice_no"></b>
+                  <span class="sub" x-text="date(r.purchase_date)"></span>
+                </td>
+                <td data-k="Customer">
+                  <b x-text="r.supplier_name"></b>
+                  <span class="sub" x-text="itemsText(r)"></span>
+                </td>
+                <td class="num" data-k="Total"><b x-text="taka(r.grand_total)"></b></td>
+                <td class="num hide-md" data-k="Paid" x-text="taka(r.paid_amount)"></td>
+                <td class="num" data-k="Due"><span :class="{ 'txt-due': r.due_amount > 0 }" x-text="r.due_amount > 0 ? taka(r.due_amount) : '—'"></span></td>
+                <td class="c" data-k="Status"><span class="pill" :class="'st-' + r.payment_status" x-text="statusLabel(r.payment_status)"></span></td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !rows.length ? 6 : 0)" :key="'sk' + i">
+              <tr class="sk-row"><td colspan="6"><span class="sk-line"></span></td></tr>
+            </template>
+          </tbody>
+        </table>
+
+        <template x-if="!loading && !rows.length">
+          <div class="empty">
+            <div class="tile">{% icon "truck" 26 %}</div>
+            <h2 x-text="filtered ? 'No purchases match these filters' : 'No purchases this month yet'"></h2>
+            <p x-text="filtered ? 'Try a wider date range or clear the filters.' : 'Stock you buy from suppliers will appear here.'"></p>
+            <button class="btn btn-ghost" x-show="filtered" @click="clearAll()">Reset filters</button>
+            {% if can_create %}<a class="btn btn-primary" x-show="!filtered" href="{% url 'web:purchase_new' %}">{% icon "plus" 18 %} New purchase</a>{% endif %}
+          </div>
+        </template>
+
+        <nav class="pager" x-show="meta.count > 0" aria-label="Pages">
+          <span class="pager-info" x-text="`Showing ${from}–${to} of ${num(meta.count)}`"></span>
+          <div class="pager-btns" x-show="meta.total_pages > 1">
+            <button type="button" class="icon-btn" :disabled="page <= 1" @click="go(page - 1)" aria-label="Previous page">{% icon "chevron-left" 18 %}</button>
+            <template x-for="(p, i) in pages" :key="i + '-' + p">
+              <button type="button" class="pg" :class="{ 'is-on': p === page }" :disabled="p === '…'" @click="go(p)" x-text="p"
+                      :aria-current="p === page ? 'page' : null"></button>
+            </template>
+            <button type="button" class="icon-btn" :disabled="page >= meta.total_pages" @click="go(page + 1)" aria-label="Next page">{% icon "chevron-right" 18 %}</button>
+          </div>
+        </nav>
+      </div>
+    </template>
+  </section>
+
+  {# ───────────── invoice drawer ───────────── #}
+  <div class="drawer-wrap" x-show="sel" x-cloak x-transition.opacity.duration.150ms @click.self="shut()">
+    <aside class="drawer" role="dialog" aria-modal="true" aria-label="Purchase invoice" x-show="sel"
+           x-transition:enter="drawer-in" x-transition:enter-start="drawer-from" x-transition:enter-end="drawer-to">
+      <template x-if="sel">
+        <div class="drawer-body">
+          <header class="drawer-head no-print">
+            <div>
+              <h2 x-text="sel.invoice_no"></h2>
+              <span class="pill" :class="'st-' + sel.payment_status" x-text="statusLabel(sel.payment_status)"></span>
+            </div>
+            <div class="drawer-actions">
+              <template x-if="canCancel && sel.payment_status !== 'cancelled'">
+                <button type="button" class="icon-btn danger" @click="openCancel()" aria-label="Cancel this purchase" title="Cancel purchase">{% icon "trash" 18 %}</button>
+              </template>
+              <button type="button" class="btn btn-ghost" @click="print()">{% icon "printer" 18 %} <span>Print</span></button>
+              <button type="button" class="icon-btn" @click="shut()" aria-label="Close">{% icon "x" 18 %}</button>
+            </div>
+          </header>
+
+          <div class="void-note no-print" x-show="sel.payment_status === 'cancelled'">
+            {% icon "info" 16 %}<span>This purchase was cancelled. Its stock was taken back out and any payment was returned to the account.</span>
+          </div>
+
+          <div class="invoice print-area" :class="{ 'is-void': sel.payment_status === 'cancelled' }">
+            <div class="inv-top">
+              <div>
+                <b class="inv-co">{{ web_company.name }}</b>
+                <span x-text="sel.payment_status === 'cancelled' ? 'Purchase invoice (cancelled)' : 'Purchase invoice'"></span>
+              </div>
+              <div class="inv-meta">
+                <b x-text="sel.invoice_no"></b>
+                <span x-text="date(sel.purchase_date)"></span>
+              </div>
+            </div>
+
+            <div class="inv-parties">
+              <div><span>Supplier</span><b x-text="sel.supplier_name"></b></div>
+              <div><span>Items</span><b x-text="itemsText(sel)"></b></div>
+              <div><span>Paid from</span><b x-text="payWith(sel)"></b></div>
+            </div>
+
+            <table class="inv-items">
+              <thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Unit cost</th><th class="num">Amount</th></tr></thead>
+              <tbody>
+                <template x-for="it in sel.items" :key="it.id">
+                  <tr>
+                    <td><b x-text="it.product_name"></b><span class="sub" x-show="itemOff(it)" x-text="itemOff(it)"></span></td>
+                    <td class="num" x-text="num(it.qty)"></td>
+                    <td class="num" x-text="taka(it.price)"></td>
+                    <td class="num" x-text="taka(it.product_total)"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+
+            <dl class="inv-totals">
+              <template x-for="ln in lines(sel)" :key="ln[0]">
+                <div><dt x-text="ln[0]"></dt><dd x-text="ln[1] < 0 ? '− ' + taka(-ln[1]) : taka(ln[1])"></dd></div>
+              </template>
+              <div class="grand"><dt>Total</dt><dd x-text="taka(sel.grand_total)"></dd></div>
+              <div><dt>Paid</dt><dd x-text="taka(sel.paid_amount)"></dd></div>
+              <div class="due" x-show="Number(sel.due_amount) > 0"><dt>Due to supplier</dt><dd x-text="taka(sel.due_amount)"></dd></div>
+            </dl>
+
+            <template x-if="(sel.transactions || []).length">
+              <div class="inv-pays">
+                <h4>Money movements</h4>
+                <template x-for="t in sel.transactions" :key="t.id">
+                  <p><span x-text="(t.type === 'credit' ? 'Returned to account' : 'Paid') + ', ' + dateTime(t.created_at)"></span>
+                     <b :class="t.type === 'credit' ? 'txt-ok' : ''" x-text="(t.type === 'credit' ? '+ ' : '− ') + taka(t.amount)"></b></p>
+                </template>
+              </div>
+            </template>
+
+            <p class="inv-note" x-show="sel.remark" x-text="sel.remark"></p>
+          </div>
+        </div>
+      </template>
+    </aside>
+  </div>
+
+  {# ───────────── cancel confirm ───────────── #}
+  <div class="modal-wrap" x-show="confirmCancel" x-cloak x-transition.opacity.duration.120ms @click.self="confirmCancel = false"
+       role="dialog" aria-modal="true" aria-labelledby="pc-title">
+    <div class="modal">
+      <div class="modal-icon">{% icon "trash" 22 %}</div>
+      <h2 id="pc-title">Cancel <span x-text="sel && sel.invoice_no"></span>?</h2>
+      <p>The stock this invoice added is taken back out<template x-if="sel && Number(sel.paid_amount) > 0"><span>, and the
+        <b x-text="taka(sel.paid_amount)"></b> paid goes back into <b x-text="sel.account_name || 'the account'"></b></span></template>.
+        The invoice stays in the list, marked cancelled.</p>
+      <label class="fld">
+        <span class="fld-label">Reason <small>(optional)</small></span>
+        <input class="in" type="text" maxlength="200" x-model="cancelReason" placeholder="e.g. Wrong supplier, entered twice">
+      </label>
+      <p class="modal-err" x-show="cancelError" x-text="cancelError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="confirmCancel = false" :disabled="cancelling">Keep it</button>
+        <button type="button" class="btn btn-danger" @click="cancelPurchase()" :disabled="cancelling">
+          <span x-text="cancelling ? 'Cancelling…' : 'Cancel purchase'"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" x-show="toast" x-cloak x-transition.opacity role="status" x-text="toast"></div>
+</div>
+{% endblock %}

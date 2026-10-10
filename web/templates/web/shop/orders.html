@@ -1,0 +1,72 @@
+{% extends "web/base.html" %}
+{% load web_tags %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h3>Your online shop</h3>
+    <span>Share this link with customers</span>
+  </div>
+  <div class="input-wrap" x-data="{ copied: false }" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <input class="input" style="flex:1;min-width:220px" readonly value="{{ shop_url }}" @focus="$el.select()">
+    <button type="button" class="btn btn-ghost"
+            @click="navigator.clipboard.writeText('{{ shop_url }}'); copied = true; setTimeout(() => copied = false, 1500)"
+            x-text="copied ? 'Copied' : 'Copy link'"></button>
+    <a class="btn btn-ghost" href="{% url 'web:shop_settings' %}">Shop settings</a>
+    <a class="btn btn-primary" href="{{ shop_url }}" target="_blank" rel="noopener">Open shop</a>
+  </div>
+</section>
+
+<section class="panel filters">
+  <div class="f-row">
+    {% for key, label, n in tabs %}
+      <a class="chip{% if key == status %} is-on{% endif %}" href="?status={{ key }}{% if q %}&q={{ q|urlencode }}{% endif %}">{{ label }} <span class="chip-n">{{ n }}</span></a>
+    {% endfor %}
+    <form method="get" class="f-search" style="margin-left:auto">
+      <input type="hidden" name="status" value="{{ status }}">
+      <input type="search" name="q" value="{{ q }}" placeholder="Order no, name or phone" aria-label="Search orders">
+    </form>
+  </div>
+</section>
+
+{% for o in orders %}
+<section class="panel">
+  <div class="panel-head">
+    <h3>{{ o.order_no }} · {{ o.customer_name }}</h3>
+    <span><span class="pill st-{{ o.status }}">{{ o.get_status_display }}</span> · {{ o.created_at|date:"j M Y, g:i A" }}</span>
+  </div>
+  <p style="margin:0 0 6px"><b>{{ o.phone }}</b> — {{ o.address }}</p>
+  {% if o.sale %}<p style="margin:0 0 6px;color:var(--muted)">Invoice {{ o.sale.invoice_no }} · paid {{ o.sale.paid_amount }} · due {{ o.sale.due_amount }}</p>{% endif %}
+  {% if o.note %}<p style="margin:0 0 6px;color:var(--muted)">Note: {{ o.note }}</p>{% endif %}
+  <table class="dt">
+    <thead><tr><th>Product</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Total</th></tr></thead>
+    <tbody>
+      {% for it in o.items.all %}
+      <tr><td>{{ it.product_name }}</td><td class="num">{{ it.qty }}</td><td class="num">{{ it.unit_price }}</td><td class="num">{{ it.line_total }}</td></tr>
+      {% endfor %}
+      {% if o.delivery_charge %}<tr><td colspan="3">Delivery</td><td class="num">{{ o.delivery_charge }}</td></tr>{% endif %}
+      <tr><td colspan="3"><b>Total</b></td><td class="num"><b>{{ o.total }}</b></td></tr>
+    </tbody>
+  </table>
+  {% if can_edit and o.status == "pending" or can_edit and o.status == "confirmed" %}
+  <form method="post" style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
+    {% csrf_token %}
+    <input type="hidden" name="order_id" value="{{ o.pk }}">
+    <input type="hidden" name="back" value="{{ request.get_full_path }}">
+    {% if o.status == "pending" %}
+      <button name="action" value="confirm" class="btn btn-primary btn-sm">Confirm order</button>
+    {% else %}
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;margin-right:auto"><input type="checkbox" name="cash_received" checked> Cash received</label>
+      <button name="action" value="deliver" class="btn btn-primary btn-sm">Mark delivered</button>
+    {% endif %}
+    <button name="action" value="cancel" class="btn btn-danger btn-sm" onclick="return confirm('Cancel this order?')">Cancel</button>
+  </form>
+  {% endif %}
+</section>
+{% empty %}
+<section class="panel empty">
+  <div class="tile">{% icon "cart" 26 %}</div>
+  <h2>No orders here</h2>
+  <p>New orders from your online shop will appear here.</p>
+</section>
+{% endfor %}
+{% endblock %}

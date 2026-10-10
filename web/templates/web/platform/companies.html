@@ -1,0 +1,417 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/platform.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  <button type="button" class="btn btn-primary top-act" onclick="window.dispatchEvent(new CustomEvent('company-new'))">{% icon "plus" 18 %}<span>New company</span></button>
+{% endblock %}
+{% block content %}
+{{ pf_plans|json_script:"pf-plans" }}
+<div x-data="platformCompanies(JSON.parse(document.getElementById('pf-plans').textContent))"
+     @company-new.window="openNew()" @keydown.escape.window="escape()">
+
+  <section class="panel filters">
+    <div class="f-row">
+      <label class="f-search">
+        {% icon "search" 18 %}
+        <input type="search" x-model="f.q" placeholder="Search company, code, phone, email or admin username" aria-label="Search companies">
+      </label>
+    </div>
+    <div class="f-row">
+      <div class="chips" role="radiogroup" aria-label="Show">
+        <template x-for="c in chips" :key="c.key">
+          <button type="button" class="chip" role="radio" :aria-checked="(f.status === c.key).toString()"
+                  :class="{ 'is-on': f.status === c.key }" @click="f.status = c.key"><span x-text="c.label"></span><span class="chip-n" x-text="c.n"></span></button>
+        </template>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <template x-if="error">
+      <div class="empty">
+        <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2>Couldn't load companies</h2><p x-text="error"></p>
+        <button class="btn btn-ghost" @click="load()">Try again</button>
+      </div>
+    </template>
+    <template x-if="!error">
+      <div>
+        <table class="dt pf-table" :class="{ 'is-loading': loading }">
+          <thead><tr><th>Company</th><th class="hide-md">Admin</th><th class="hide-md">Plan</th><th class="hide-md">Users</th><th>Subscription</th><th class="c">Status</th></tr></thead>
+          <tbody>
+            <template x-for="r in rows" :key="r.id">
+              <tr tabindex="0" @click="open(r)" @keydown.enter="open(r)" :aria-label="'Open ' + r.name" :class="{ 'is-void': r.state === 'suspended' }">
+                <td data-k="Company">
+                  <span class="pf-co">
+                    <span class="pf-logo" :style="r.logo ? 'background-image:url(' + r.logo + ')' : ''" x-text="r.logo ? '' : r.name.slice(0, 1).toUpperCase()"></span>
+                    <span><b x-text="r.name"></b><span class="sub"><span x-text="r.company_code"></span><span x-show="r.phone" x-text="' · ' + r.phone"></span></span></span>
+                  </span>
+                </td>
+                <td class="hide-md" data-k="Admin"><template x-if="r.admin"><span><span x-text="r.admin.name"></span><span class="sub" x-text="r.admin.username"></span></span></template>
+                  <span class="muted" x-show="!r.admin">No admin yet</span></td>
+                <td class="hide-md" data-k="Plan" x-text="planLabel(r.plan_type)"></td>
+                <td class="hide-md" data-k="Users"><span x-text="r.active_user_count + ' / ' + r.max_users"></span><span class="sub" x-text="r.product_count + ' products'"></span></td>
+                <td data-k="Subscription"><span x-text="date(r.expiry_date)"></span><span class="sub" :class="{ 'txt-due': r.days_left != null && r.days_left <= 7 }" x-text="left(r)"></span></td>
+                <td class="c" data-k="Status"><span class="pill" :class="st(r).cls" x-text="st(r).label"></span></td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !rows.length ? 4 : 0)" :key="'sk' + i">
+              <tr class="sk"><td><span class="sk-line" style="width:55%"></span></td><td class="hide-md"><span class="sk-line"></span></td><td class="hide-md"></td><td class="hide-md"></td><td><span class="sk-line" style="width:70%"></span></td><td></td></tr>
+            </template>
+          </tbody>
+        </table>
+        <template x-if="!loading && !rows.length">
+          <div class="empty">
+            <div class="tile">{% icon "building" 26 %}</div>
+            <template x-if="!f.q && f.status === 'all'"><div>
+              <h2>No companies yet</h2>
+              <p>Open a company for each shop that uses the software. You'll set up its admin at the same time, and they take it from there.</p>
+              <button class="btn btn-primary" @click="openNew()">{% icon "plus" 18 %} New company</button>
+            </div></template>
+            <template x-if="f.q || f.status !== 'all'"><div>
+              <h2>Nothing matches</h2><p>Try another search or status.</p>
+              <button class="btn btn-ghost" @click="f.q = ''; f.status = 'all'">Show all companies</button>
+            </div></template>
+          </div>
+        </template>
+      </div>
+    </template>
+  </section>
+
+  {# ───────────── company drawer ───────────── #}
+  <div class="drawer-wrap" x-show="sel" x-cloak x-transition.opacity.duration.150ms @click.self="shut()">
+    <aside class="drawer drawer-wide" role="dialog" aria-modal="true" aria-label="Company" x-show="sel"
+           x-transition:enter="drawer-in" x-transition:enter-start="drawer-from" x-transition:enter-end="drawer-to">
+      <template x-if="sel && sel.name">
+        <div class="drawer-body">
+          <header class="drawer-head">
+            <div><h2 x-text="sel.name"></h2><span class="pill" :class="st(sel).cls" x-text="st(sel).label"></span></div>
+            <div class="drawer-actions">
+              <button type="button" class="btn btn-ghost" @click="openEdit()">{% icon "pencil" 16 %} <span>Edit</span></button>
+              <button type="button" class="icon-btn" @click="shut()" aria-label="Close">{% icon "x" 18 %}</button>
+            </div>
+          </header>
+
+          <div class="pf-body">
+            <div class="pf-alert" x-show="sel.state === 'suspended'">
+              {% icon "lock" 18 %}<span><b>Suspended.</b> Nobody from this company can sign in.</span>
+              <button type="button" class="btn btn-ghost btn-sm" @click="askSuspend()">Turn on</button>
+            </div>
+            <div class="pf-alert warn" x-show="sel.state === 'expired'">
+              {% icon "clock" 18 %}<span><b>Subscription ended</b> on <span x-text="date(sel.expiry_date)"></span>. Extend it to let them sign in again.</span>
+            </div>
+
+            {# subscription #}
+            <section class="pf-card">
+              <div class="pf-card-h"><h3>Subscription</h3><span class="pf-code" title="Company code" x-text="sel.company_code"></span></div>
+              <div class="pf-sub">
+                <div><span>Plan</span><b x-text="planLabel(sel.plan_type)"></b></div>
+                <div><span>Started</span><b x-text="date(sel.start_date)"></b></div>
+                <div><span>Ends</span><b x-text="date(sel.expiry_date)"></b><small :class="{ 'txt-due': sel.days_left != null && sel.days_left <= 7 }" x-text="left(sel)"></small></div>
+              </div>
+              <div class="pf-extend">
+                <span>Extend by</span>
+                <button type="button" class="chip" @click="extend(1)" :disabled="busy">1 month</button>
+                <button type="button" class="chip" @click="extend(6)" :disabled="busy">6 months</button>
+                <button type="button" class="chip" @click="extend(12)" :disabled="busy">1 year</button>
+              </div>
+              <div class="pf-limits">
+                <div><span>Users</span><b x-text="sel.active_user_count + ' of ' + sel.max_users"></b>
+                  <i><em :style="'width:' + Math.min(100, sel.active_user_count / Math.max(1, sel.max_users) * 100) + '%'"></em></i></div>
+                <div><span>Products</span><b x-text="sel.product_count + ' of ' + sel.max_products"></b>
+                  <i><em :style="'width:' + Math.min(100, sel.product_count / Math.max(1, sel.max_products) * 100) + '%'"></em></i></div>
+                <div><span>Branches</span><b x-text="'Up to ' + sel.max_branches"></b></div>
+              </div>
+            </section>
+
+            {# people #}
+            <section class="pf-card">
+              <div class="pf-card-h"><h3>People who can sign in</h3>
+                <button type="button" class="btn btn-ghost btn-sm" @click="openAdmin()">{% icon "plus" 16 %} Add admin</button></div>
+              <p class="pf-hint">Admins add their own staff and set what each person can do from inside the software.</p>
+              <ul class="pf-users">
+                <template x-for="u in users" :key="u.id">
+                  <li :class="{ 'is-off': !u.is_active }">
+                    <span class="pf-av" x-text="(u.name || u.username).slice(0, 1).toUpperCase()"></span>
+                    <span class="pf-u">
+                      <b><span x-text="u.name"></span> <span class="pill sm" :class="u.role === 'ADMIN' ? 'st-partial' : ''" x-text="roleLabel(u.role)"></span>
+                        <span class="pill sm st-off" x-show="!u.is_active">Off</span></b>
+                      <small><span x-text="u.username"></span><span x-show="u.email" x-text="' · ' + u.email"></span></small>
+                      <small x-text="ago(u.last_login)"></small>
+                    </span>
+                    <span class="pf-uact">
+                      <button type="button" class="btn-link" @click="openPw(u)">{% icon "key" 15 %} Password</button>
+                      <button type="button" class="btn-link" :class="{ 'danger': u.is_active }" @click="askUser(u)" x-text="u.is_active ? 'Turn off' : 'Turn on'"></button>
+                    </span>
+                  </li>
+                </template>
+                <li class="pf-none" x-show="!users.length && !selLoading">No one can sign in yet. Add an admin.</li>
+              </ul>
+            </section>
+
+            {# contact #}
+            <section class="pf-card">
+              <div class="pf-card-h"><h3>Contact</h3></div>
+              <dl class="pf-kv">
+                <div><dt>Phone</dt><dd x-text="sel.phone || '—'"></dd></div>
+                <div><dt>Email</dt><dd x-text="sel.email || '—'"></dd></div>
+                <div><dt>Address</dt><dd x-text="sel.address || '—'"></dd></div>
+                <div><dt>Trade licence</dt><dd x-text="sel.trade_license || '—'"></dd></div>
+                <div><dt>Website</dt><dd x-text="sel.website || '—'"></dd></div>
+                <div><dt>Opened</dt><dd x-text="date(sel.created_at)"></dd></div>
+              </dl>
+            </section>
+
+            <div class="pf-danger" x-show="sel.state !== 'suspended'">
+              <div><b>Suspend company</b><small>Stops everyone from this company signing in. Nothing is deleted.</small></div>
+              <button type="button" class="btn btn-ghost danger-txt" @click="askSuspend()">Suspend</button>
+            </div>
+          </div>
+        </div>
+      </template>
+      <template x-if="sel && !sel.name"><div class="drawer-body"><p class="rows-empty">Loading…</p></div></template>
+    </aside>
+  </div>
+
+  {# ───────────── new / edit company ───────────── #}
+  <div class="modal-wrap" x-show="formOpen" x-cloak x-transition.opacity.duration.120ms @click.self="!saving && step !== 3 && (formOpen = false)" role="dialog" aria-modal="true" aria-labelledby="pf-title">
+    <form class="modal modal-wide pf-modal" @submit.prevent="mode === 'new' && step === 1 ? next() : save()" novalidate>
+      <template x-if="step !== 3">
+        <div>
+          <h2 id="pf-title" x-text="mode === 'edit' ? 'Edit ' + (sel && sel.name) : 'New company'"></h2>
+          <ol class="pf-steps" x-show="mode === 'new'">
+            <li :class="{ 'is-on': step === 1, 'is-done': step > 1 }"><button type="button" @click="step = 1"><i>1</i> Company</button></li>
+            <li :class="{ 'is-on': step === 2 }"><button type="button" @click="next()"><i>2</i> First admin</button></li>
+          </ol>
+        </div>
+      </template>
+
+      {# step 1: company + plan #}
+      <div x-show="step === 1">
+        <div class="fld" :class="{ 'has-error': fe.company.name }">
+          <label class="fld-label" for="pc-name">Company name <i>*</i></label>
+          <input id="pc-name" x-ref="cName" class="in" type="text" maxlength="150" x-model="c.name" @input="nameChanged()" placeholder="e.g. Rahman Traders" autocomplete="off">
+          <p class="fld-err" x-show="fe.company.name" x-text="fe.company.name"></p>
+        </div>
+        <div class="fld-row">
+          <div class="fld" :class="{ 'has-error': fe.company.phone }">
+            <label class="fld-label" for="pc-phone">Phone <i>*</i></label>
+            <input id="pc-phone" class="in" type="tel" maxlength="20" x-model="c.phone" @input="fe.company.phone = ''" placeholder="01XXXXXXXXX">
+            <p class="fld-err" x-show="fe.company.phone" x-text="fe.company.phone"></p>
+          </div>
+          <div class="fld" :class="{ 'has-error': fe.company.email }">
+            <label class="fld-label" for="pc-email">Email</label>
+            <input id="pc-email" class="in" type="email" maxlength="254" x-model="c.email" @input="fe.company.email = ''">
+            <p class="fld-err" x-show="fe.company.email" x-text="fe.company.email"></p>
+          </div>
+        </div>
+        <div class="fld">
+          <label class="fld-label" for="pc-addr">Address</label>
+          <textarea id="pc-addr" class="in" rows="2" x-model="c.address" placeholder="Printed on invoices and receipts"></textarea>
+        </div>
+        <div class="fld-row">
+          <div class="fld"><label class="fld-label" for="pc-tl">Trade licence no.</label><input id="pc-tl" class="in" type="text" maxlength="100" x-model="c.trade_license"></div>
+          <div class="fld"><label class="fld-label" for="pc-web">Website</label><input id="pc-web" class="in" type="text" maxlength="200" x-model="c.website" placeholder="example.com"></div>
+        </div>
+
+        <h4 class="pf-sec">Plan & subscription</h4>
+        <div class="fld">
+          <div class="seg seg-fill" role="radiogroup" aria-label="Plan">
+            <template x-for="p in plans" :key="p.value">
+              <button type="button" role="radio" :aria-checked="(c.plan_type === p.value).toString()" :class="{ 'is-on': c.plan_type === p.value }" @click="c.plan_type = p.value" x-text="p.label"></button>
+            </template>
+          </div>
+        </div>
+        <div class="fld" :class="{ 'has-error': fe.company.expiry_date }">
+          <label class="fld-label" for="pc-exp">Subscription ends <i>*</i></label>
+          <div class="pf-exp">
+            <input id="pc-exp" class="in" type="date" x-model="c.expiry_date" @input="fe.company.expiry_date = ''">
+            <button type="button" class="chip" @click="setExpiry(1)">1 month</button>
+            <button type="button" class="chip" @click="setExpiry(6)">6 months</button>
+            <button type="button" class="chip" @click="setExpiry(12)">1 year</button>
+          </div>
+          <p class="fld-err" x-show="fe.company.expiry_date" x-text="fe.company.expiry_date"></p>
+          <p class="fld-hint" x-show="!fe.company.expiry_date">After this date nobody from the company can sign in until you extend it.</p>
+        </div>
+        <div class="pf-lims">
+          <div class="fld" :class="{ 'has-error': fe.company.max_users }"><label class="fld-label" for="pc-mu">Max users</label>
+            <input id="pc-mu" class="in" type="number" min="1" x-model="c.max_users" @input="fe.company.max_users = ''"><p class="fld-err" x-show="fe.company.max_users" x-text="fe.company.max_users"></p></div>
+          <div class="fld" :class="{ 'has-error': fe.company.max_products }"><label class="fld-label" for="pc-mp">Max products</label>
+            <input id="pc-mp" class="in" type="number" min="1" x-model="c.max_products" @input="fe.company.max_products = ''"><p class="fld-err" x-show="fe.company.max_products" x-text="fe.company.max_products"></p></div>
+          <div class="fld" :class="{ 'has-error': fe.company.max_branches }"><label class="fld-label" for="pc-mb">Max branches</label>
+            <input id="pc-mb" class="in" type="number" min="1" x-model="c.max_branches" @input="fe.company.max_branches = ''"><p class="fld-err" x-show="fe.company.max_branches" x-text="fe.company.max_branches"></p></div>
+        </div>
+      </div>
+
+      {# step 2: admin #}
+      <div x-show="step === 2" x-cloak>
+        <p class="modal-sub">This person runs <b x-text="c.name"></b> in the software: adds staff, products, accounts, and everything else.</p>
+        <div class="fld-row">
+          <div class="fld" :class="{ 'has-error': fe.admin.first_name }">
+            <label class="fld-label" for="pa-first">First name <i>*</i></label>
+            <input id="pa-first" x-ref="aFirst" class="in" type="text" maxlength="150" x-model="a.first_name" @input="fe.admin.first_name = ''">
+            <p class="fld-err" x-show="fe.admin.first_name" x-text="fe.admin.first_name"></p>
+          </div>
+          <div class="fld"><label class="fld-label" for="pa-last">Last name</label><input id="pa-last" class="in" type="text" maxlength="150" x-model="a.last_name"></div>
+        </div>
+        <div class="fld-row">
+          <div class="fld" :class="{ 'has-error': fe.admin.phone }"><label class="fld-label" for="pa-phone">Phone</label>
+            <input id="pa-phone" class="in" type="tel" maxlength="20" x-model="a.phone"></div>
+          <div class="fld" :class="{ 'has-error': fe.admin.email }"><label class="fld-label" for="pa-email">Email</label>
+            <input id="pa-email" class="in" type="email" maxlength="254" x-model="a.email" @input="fe.admin.email = ''">
+            <p class="fld-err" x-show="fe.admin.email" x-text="fe.admin.email"></p>
+            <p class="fld-hint" x-show="!fe.admin.email">They can sign in with this too.</p></div>
+        </div>
+        <div class="fld-row">
+          <div class="fld" :class="{ 'has-error': fe.admin.username }">
+            <label class="fld-label" for="pa-user">Username <i>*</i></label>
+            <input id="pa-user" class="in" type="text" maxlength="150" x-model="a.username" @input="userTouched = true; fe.admin.username = ''" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <p class="fld-err" x-show="fe.admin.username" x-text="fe.admin.username"></p>
+          </div>
+          <div class="fld" :class="{ 'has-error': fe.admin.password }">
+            <label class="fld-label" for="pa-pw">Password <i>*</i></label>
+            <div class="pf-pw">
+              <input id="pa-pw" class="in" :type="showPw ? 'text' : 'password'" maxlength="128" x-model="a.password" @input="fe.admin.password = ''" autocomplete="new-password" spellcheck="false">
+              <button type="button" class="icon-btn" title="Make another" aria-label="Make another password" @click="a.password = genPw(); fe.admin.password = ''">{% icon "refresh" 17 %}</button>
+            </div>
+            <p class="fld-err" x-show="fe.admin.password" x-text="fe.admin.password"></p>
+            <p class="fld-hint" x-show="!fe.admin.password">A strong one is filled in. Share it with them; they can change it later.</p>
+          </div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" x-model="seed">
+          <span class="switch-ui" aria-hidden="true"></span>
+          <span><b>Start with the basics</b><small>Adds common units (Pieces, Kilogram, Litre…) and a Cash account, so they can add products and sell on day one.</small></span>
+        </label>
+      </div>
+
+      {# step 3: done #}
+      <template x-if="step === 3 && done">
+        <div class="pf-done">
+          <div class="pf-done-ic">{% icon "check-circle" 30 %}</div>
+          <h2 x-text="done.company.name + ' is ready'"></h2>
+          <p>Send these sign-in details to <b x-text="done.admin.name"></b>. They'll see their own empty shop and set up the rest.</p>
+          <div class="pf-cred">
+            <div><span>Sign in at</span><b x-text="signInUrl"></b></div>
+            <div><span>Username</span><b x-text="done.admin.username"></b></div>
+            <div><span>Password</span><b x-text="done.password"></b></div>
+            <div><span>Company code</span><b x-text="done.company.company_code"></b></div>
+          </div>
+          <button type="button" class="btn btn-ghost pf-copy" @click="copy(credText(done.company.name, done.admin.username, done.password), 'new')">
+            <span x-show="copied !== 'new'">Copy sign-in details</span><span x-show="copied === 'new'">{% icon "check" 16 %} Copied</span></button>
+          <p class="pf-seeded" x-show="done.seeded && (done.seeded.units || done.seeded.accounts)"
+             x-text="'Also added: ' + [done.seeded.units ? done.seeded.units + ' units' : '', done.seeded.accounts ? 'a Cash account' : ''].filter(Boolean).join(' and ') + '.'"></p>
+          <p class="pf-warn">{% icon "info" 15 %} The password isn't shown again after you close this.</p>
+        </div>
+      </template>
+
+      <p class="modal-err" x-show="formError" x-text="formError"></p>
+      <div class="modal-actions">
+        <template x-if="step === 3">
+          <div class="pf-done-act">
+            <button type="button" class="btn btn-ghost" @click="formOpen = false">Done</button>
+            <button type="button" class="btn btn-primary" @click="openDone()">Open company</button>
+          </div>
+        </template>
+        <template x-if="step !== 3">
+          <div class="pf-done-act">
+            <button type="button" class="btn btn-ghost" x-show="mode === 'new' && step === 2" @click="step = 1" :disabled="saving">Back</button>
+            <button type="button" class="btn btn-ghost" x-show="!(mode === 'new' && step === 2)" @click="formOpen = false" :disabled="saving">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="saving"
+                    x-text="saving ? 'Saving…' : (mode === 'edit' ? 'Save changes' : (step === 1 ? 'Next: first admin' : 'Open company'))"></button>
+          </div>
+        </template>
+      </div>
+    </form>
+  </div>
+
+  {# ───────────── add admin ───────────── #}
+  <div class="modal-wrap" x-show="adOpen" x-cloak x-transition.opacity.duration.120ms @click.self="!adSaving && (adOpen = false)" role="dialog" aria-modal="true" aria-labelledby="ad-title">
+    <form class="modal modal-wide" @submit.prevent="adDone ? (adOpen = false) : saveAdmin()" novalidate>
+      <template x-if="!adDone"><div>
+        <h2 id="ad-title">Add admin</h2>
+        <p class="modal-sub">Another person with full control of <b x-text="sel && sel.name"></b>.</p>
+        <div class="fld-row">
+          <div class="fld" :class="{ 'has-error': adErr.first_name }"><label class="fld-label" for="ad-first">First name <i>*</i></label>
+            <input id="ad-first" x-ref="adFirst" class="in" type="text" maxlength="150" x-model="ad.first_name" @input="adErr.first_name = ''"><p class="fld-err" x-show="adErr.first_name" x-text="adErr.first_name"></p></div>
+          <div class="fld"><label class="fld-label" for="ad-last">Last name</label><input id="ad-last" class="in" type="text" maxlength="150" x-model="ad.last_name"></div>
+        </div>
+        <div class="fld-row">
+          <div class="fld"><label class="fld-label" for="ad-phone">Phone</label><input id="ad-phone" class="in" type="tel" maxlength="20" x-model="ad.phone"></div>
+          <div class="fld" :class="{ 'has-error': adErr.email }"><label class="fld-label" for="ad-email">Email</label>
+            <input id="ad-email" class="in" type="email" maxlength="254" x-model="ad.email" @input="adErr.email = ''"><p class="fld-err" x-show="adErr.email" x-text="adErr.email"></p></div>
+        </div>
+        <div class="fld-row">
+          <div class="fld" :class="{ 'has-error': adErr.username }"><label class="fld-label" for="ad-user">Username <i>*</i></label>
+            <input id="ad-user" class="in" type="text" maxlength="150" x-model="ad.username" @input="adErr.username = ''" autocomplete="off" autocapitalize="off" spellcheck="false"><p class="fld-err" x-show="adErr.username" x-text="adErr.username"></p></div>
+          <div class="fld" :class="{ 'has-error': adErr.password }"><label class="fld-label" for="ad-pw">Password <i>*</i></label>
+            <input id="ad-pw" class="in" type="text" maxlength="128" x-model="ad.password" @input="adErr.password = ''" autocomplete="new-password" spellcheck="false"><p class="fld-err" x-show="adErr.password" x-text="adErr.password"></p></div>
+        </div>
+      </div></template>
+      <template x-if="adDone"><div class="pf-done">
+        <div class="pf-done-ic">{% icon "check-circle" 30 %}</div>
+        <h2 x-text="adDone.user.name + ' can sign in'"></h2>
+        <div class="pf-cred">
+          <div><span>Sign in at</span><b x-text="signInUrl"></b></div>
+          <div><span>Username</span><b x-text="adDone.user.username"></b></div>
+          <div><span>Password</span><b x-text="adDone.password"></b></div>
+        </div>
+        <button type="button" class="btn btn-ghost pf-copy" @click="copy(credText(sel.name, adDone.user.username, adDone.password), 'ad')">
+          <span x-show="copied !== 'ad'">Copy sign-in details</span><span x-show="copied === 'ad'">{% icon "check" 16 %} Copied</span></button>
+      </div></template>
+      <p class="modal-err" x-show="adError" x-text="adError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" x-show="!adDone" @click="adOpen = false" :disabled="adSaving">Cancel</button>
+        <button type="submit" class="btn btn-primary" :disabled="adSaving" x-text="adDone ? 'Done' : (adSaving ? 'Adding…' : 'Add admin')"></button>
+      </div>
+    </form>
+  </div>
+
+  {# ───────────── reset password ───────────── #}
+  <div class="modal-wrap" x-show="pwOpen" x-cloak x-transition.opacity.duration.120ms @click.self="!pwSaving && (pwOpen = false)" role="dialog" aria-modal="true" aria-labelledby="pw-title">
+    <form class="modal" @submit.prevent="pwDone ? (pwOpen = false) : savePw()" novalidate>
+      <h2 id="pw-title" x-text="pwDone ? 'Password changed' : 'New password'"></h2>
+      <p class="modal-sub" x-show="!pwDone">For <b x-text="pwUser && pwUser.name"></b> (<span x-text="pwUser && pwUser.username"></span>). Their old password stops working.</p>
+      <template x-if="!pwDone">
+        <div class="fld" :class="{ 'has-error': pwErr }">
+          <div class="pf-pw">
+            <input class="in" type="text" maxlength="128" x-model="pw" @input="pwErr = ''" spellcheck="false" aria-label="New password">
+            <button type="button" class="icon-btn" @click="newPw()" title="Make another" aria-label="Make another password">{% icon "refresh" 17 %}</button>
+          </div>
+          <p class="fld-err" x-show="pwErr" x-text="pwErr"></p>
+        </div>
+      </template>
+      <template x-if="pwDone">
+        <div>
+          <div class="pf-cred">
+            <div><span>Username</span><b x-text="pwUser.username"></b></div>
+            <div><span>Password</span><b x-text="pwDone"></b></div>
+          </div>
+          <button type="button" class="btn btn-ghost pf-copy" @click="copy(credText(sel.name, pwUser.username, pwDone), 'pw')">
+            <span x-show="copied !== 'pw'">Copy sign-in details</span><span x-show="copied === 'pw'">{% icon "check" 16 %} Copied</span></button>
+        </div>
+      </template>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" x-show="!pwDone" @click="pwOpen = false" :disabled="pwSaving">Cancel</button>
+        <button type="submit" class="btn btn-primary" :disabled="pwSaving" x-text="pwDone ? 'Done' : (pwSaving ? 'Saving…' : 'Change password')"></button>
+      </div>
+    </form>
+  </div>
+
+  {# ───────────── confirm ───────────── #}
+  <div class="modal-wrap" x-show="confirm" x-cloak x-transition.opacity.duration.120ms @click.self="!busy && (confirm = null)" role="dialog" aria-modal="true">
+    <div class="modal">
+      <div class="modal-icon" :class="{ 'is-ok': confirm && !confirm.danger }">{% icon "lock" 22 %}</div>
+      <h2 x-text="confirm && confirm.title"></h2>
+      <p x-text="confirm && confirm.text"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="confirm = null" :disabled="busy">Cancel</button>
+        <button type="button" class="btn" :class="confirm && confirm.danger ? 'btn-danger' : 'btn-primary'" @click="doConfirm()" :disabled="busy"
+                x-text="busy ? 'Working…' : (confirm && confirm.btn)"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" x-show="toast" x-cloak x-transition.opacity role="status" x-text="toast"></div>
+</div>
+{% endblock %}

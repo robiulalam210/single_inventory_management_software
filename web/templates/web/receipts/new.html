@@ -1,0 +1,177 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/receipts.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  {% if form_init.canSeeList %}<a class="btn btn-ghost top-act" href="{% url 'web:receipts' %}">{% icon "receipt" 18 %}<span>All receipts</span></a>{% endif %}
+{% endblock %}
+{% block content %}
+{{ form_init|json_script:"mr-init" }}
+<div x-data="receiptForm(JSON.parse(document.getElementById('mr-init').textContent))">
+
+  {# ───────────── saved ───────────── #}
+  <template x-if="done">
+    <section class="panel mr-done">
+      <div class="mr-done-ic">{% icon "check" 28 %}</div>
+      <h2><span x-text="done.mr_no"></span> saved</h2>
+      <p class="mr-done-amt" x-text="taka(done.amount)"></p>
+      <p class="mr-done-sub">received from <b x-text="done.customer_name"></b> into <b x-text="done.account_name"></b></p>
+      <ul class="mr-done-lines" x-show="done.plan.lines.length || done.plan.advance > 0">
+        <template x-for="l in done.plan.lines" :key="l.id">
+          <li><span x-text="l.invoice"></span><b x-text="l.clears ? 'Paid in full' : taka(l.take) + ' paid'"></b></li>
+        </template>
+        <li x-show="done.plan.advance > 0"><span>Kept as advance</span><b x-text="taka(done.plan.advance)"></b></li>
+      </ul>
+      <div class="mr-done-actions">
+        <template x-if="canSeeList">
+          <a class="btn btn-ghost" :href="'{% url 'web:receipts' %}?period=all&open=' + done.id">{% icon "printer" 18 %} View &amp; print</a>
+        </template>
+        <button type="button" class="btn btn-primary" @click="again()">{% icon "plus" 18 %} New receipt</button>
+      </div>
+    </section>
+  </template>
+
+  {# ───────────── form ───────────── #}
+  <form x-show="!done" class="mr-grid" @submit.prevent="save()" novalidate>
+    <section class="panel mr-form">
+
+      {# 1 — কে দিচ্ছে #}
+      <div class="fgroup">
+        <div class="fgroup-head"><span class="step">1</span><h3>Who is paying</h3></div>
+        <div class="fld" :class="{ 'has-error': errors.customer }">
+          <label class="fld-label">Customer <i>*</i></label>
+          {% include "web/_combo.html" with model="form.customer" source="customers" placeholder="Search customer by name or phone" icon="users" %}
+          <p class="fld-err" x-show="errors.customer" x-text="errors.customer"></p>
+        </div>
+        <template x-if="customer">
+          <div class="cust-card">
+            <div><span>Total due</span><b :class="{ 'txt-due': totalDue > 0 }" x-text="duesLoading ? '…' : taka(totalDue)"></b>
+              <small x-text="duesLoading ? '' : (dues.length + (dues.length === 1 ? ' invoice' : ' invoices'))"></small></div>
+            <div><span>Advance balance</span><b x-text="taka(customer.advance_balance)"></b></div>
+            <div><span>Phone</span><b x-text="customer.phone || '—'"></b></div>
+          </div>
+        </template>
+      </div>
+
+      {# 2 — কোন বাকিতে বসবে #}
+      <div class="fgroup" x-show="form.customer" x-cloak>
+        <div class="fgroup-head"><span class="step">2</span><h3>Apply the payment to</h3></div>
+        <div class="choice" role="radiogroup">
+          <label class="choice-opt" :class="{ 'is-on': form.mode === 'overall' }">
+            <input type="radio" value="overall" x-model="form.mode">
+            <b>Oldest dues first</b>
+            <span>Clears the oldest invoices first. Anything extra is kept as advance.</span>
+          </label>
+          <label class="choice-opt" :class="{ 'is-on': form.mode === 'specific', 'is-off': !dues.length }">
+            <input type="radio" value="specific" x-model="form.mode" :disabled="!dues.length">
+            <b>One invoice</b>
+            <span x-text="dues.length ? 'Pick the invoice this money is for.' : 'This customer has no unpaid invoices.'"></span>
+          </label>
+        </div>
+        <div class="fld" x-show="form.mode === 'specific'" x-cloak :class="{ 'has-error': errors.sale }">
+          <label class="fld-label">Invoice <i>*</i></label>
+          {% include "web/_combo.html" with model="form.sale" source="invoiceOptions" placeholder="Choose an unpaid invoice" icon="receipt" %}
+          <p class="fld-err" x-show="errors.sale" x-text="errors.sale"></p>
+        </div>
+      </div>
+
+      {# 3 — কত টাকা, কীভাবে #}
+      <div class="fgroup">
+        <div class="fgroup-head"><span class="step" x-text="form.customer ? 3 : 2">3</span><h3>Amount and payment</h3></div>
+        <div class="fld-row">
+          <div class="fld" :class="{ 'has-error': errors.amount }">
+            <label class="fld-label" for="mr-amount">Amount <i>*</i></label>
+            <div class="money-in">
+              <span>৳</span>
+              <input id="mr-amount" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00"
+                     x-model="form.amount" @input="errors.amount = ''; form.amount = form.amount.replace(/[^0-9.,]/g, '')">
+            </div>
+            <div class="quick" x-show="form.mode === 'overall' && totalDue > 0">
+              <button type="button" class="chip" @click="fill(totalDue)">All dues <span x-text="taka(totalDue)"></span></button>
+            </div>
+            <div class="quick" x-show="form.mode === 'specific' && selectedSale">
+              <button type="button" class="chip" @click="fill(selectedSale.due_amount)">Invoice due <span x-text="selectedSale && taka(selectedSale.due_amount)"></span></button>
+            </div>
+            <p class="fld-err" x-show="errors.amount" x-text="errors.amount"></p>
+            <p class="fld-hint" x-show="amountNum > 0 && !errors.amount" x-text="words(amountNum)"></p>
+          </div>
+          <div class="fld" :class="{ 'has-error': errors.date }">
+            <label class="fld-label" for="mr-date">Date <i>*</i></label>
+            <input id="mr-date" class="in" type="date" x-model="form.date" :max="maxDate" @change="errors.date = ''">
+            <p class="fld-err" x-show="errors.date" x-text="errors.date"></p>
+          </div>
+        </div>
+
+        <div class="fld">
+          <label class="fld-label">Payment method <i>*</i></label>
+          <div class="seg seg-fill" role="radiogroup" aria-label="Payment method">
+            <template x-for="m in methods" :key="m.value">
+              <button type="button" role="radio" :aria-checked="(form.method === m.value).toString()"
+                      :class="{ 'is-on': form.method === m.value }" @click="form.method = m.value; errors.account = ''" x-text="m.label"></button>
+            </template>
+          </div>
+        </div>
+
+        <div class="fld-row">
+          <div class="fld" :class="{ 'has-error': errors.account }">
+            <label class="fld-label">Received into account <i>*</i></label>
+            {% include "web/_combo.html" with model="form.account" source="accounts" placeholder="Choose account" icon="wallet" noclear=1 %}
+            <p class="fld-err" x-show="errors.account" x-text="errors.account"></p>
+            <p class="fld-hint" x-show="!errors.account && accountsAll.length && !accounts.length" x-cloak
+               x-text="'No active ' + form.method + ' account yet.'"></p>
+          </div>
+          <div class="fld">
+            <label class="fld-label">Collected by</label>
+            <template x-if="canPickCollector">
+              <div>{% include "web/_combo.html" with model="form.seller" source="users" placeholder="Choose staff" icon="user" noclear=1 %}</div>
+            </template>
+            <template x-if="!canPickCollector">
+              <div class="in in-static">{% icon "user" 17 %}<span x-text="me.name"></span></div>
+            </template>
+          </div>
+        </div>
+
+        <div class="fld">
+          <label class="fld-label" for="mr-remark">Note <small>(optional)</small></label>
+          <textarea id="mr-remark" class="in" rows="2" maxlength="500" x-model="form.remark" placeholder="Cheque no., reference or anything to remember"></textarea>
+        </div>
+      </div>
+    </section>
+
+    {# ───────────── summary (sticky) ───────────── #}
+    <aside class="panel mr-side">
+      <h3>Receipt preview</h3>
+      <div class="mr-side-amt">
+        <span>Receiving</span>
+        <b x-text="taka(amountNum)"></b>
+        <small x-text="customer ? 'from ' + customer.name : 'Choose a customer to begin'"></small>
+      </div>
+
+      <template x-if="customer && amountNum > 0">
+        <div>
+          <h4>Where the money goes</h4>
+          <ul class="alloc">
+            <template x-for="l in plan.lines" :key="l.id">
+              <li>
+                <div><b x-text="l.invoice"></b><span x-text="l.clears ? 'Paid in full' : taka(round2(l.due - l.take)) + ' still due'"></span></div>
+                <b x-text="taka(l.take)"></b>
+              </li>
+            </template>
+            <li x-show="plan.advance > 0" class="alloc-adv">
+              <div><b>Advance</b><span>Saved for this customer's next purchase</span></div>
+              <b x-text="taka(plan.advance)"></b>
+            </li>
+          </ul>
+          <p class="alloc-note" x-show="form.mode === 'overall' && plan.lines.length && totalDue - amountNum > 0"
+             x-text="taka(round2(totalDue - amountNum)) + ' will still be due after this.'"></p>
+        </div>
+      </template>
+
+      <p class="form-err" x-show="serverError" x-cloak role="alert">{% icon "alert" 16 %}<span x-text="serverError"></span></p>
+
+      <button type="submit" class="btn btn-primary btn-block" :disabled="saving">
+        <span x-text="saving ? 'Saving…' : (amountNum > 0 ? 'Save receipt, ' + taka(amountNum) : 'Save receipt')"></span>
+      </button>
+    </aside>
+  </form>
+</div>
+{% endblock %}
