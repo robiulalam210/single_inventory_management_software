@@ -41,6 +41,7 @@ MENU = [
     ]},
     {'title': 'Customers', 'icon': 'users', 'items': [
         {'title': 'Customers', 'url': 'web:customers', 'perm': ('customers', 'view'), 'slug': 'customers'},
+        {'title': 'Due Reminders', 'url': 'web:due_reminders', 'perm': ('customers', 'view'), 'slug': 'due-reminders'},
     ]},
     {'title': 'Supplier', 'icon': 'store', 'items': [
         {'title': 'Supplier List', 'url': 'web:suppliers', 'perm': ('suppliers', 'view'), 'slug': 'suppliers'},

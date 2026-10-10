@@ -1,3 +1,38 @@
+# নতুন ফিচার — Report Excel/PDF ডাউনলোড + বাকি টাকার রিমাইন্ডার
+
+## ১. Report ডাউনলোড (Excel / PDF)
+- Reports পেজে এখন **Download Excel** ও **Download PDF** বোতাম আছে (আগের Print ও CSV থাকছে)।
+- যে report: Sales, Purchase, Profit/Loss, Expense, Customer Due, Supplier Due, Stock, Low Stock, Top Products।
+- screen এ যে তারিখ/filter বাছা, ফাইলেও ঠিক সেটাই — আর পুরো ফলাফল যায় (শুধু প্রথম পাতা নয়)।
+- API: `GET /api/reports/export/<key>/?fmt=xlsx|pdf&start=YYYY-MM-DD&end=YYYY-MM-DD` (`<key>` = sales, purchases, profit-loss, …)।
+  `format` নয়, `fmt` — কারণ `format` DRF নিজে ব্যবহার করে।
+- নতুন package লাগবে: `pip install -r requirements.txt` (openpyxl, reportlab)।
+- **PDF এ বাংলা:** reportlab এর ডিফল্ট ফন্টে বাংলা নেই। একটা `.ttf` (যেমন NotoSansBengali-Regular.ttf) `reports/fonts/` এ রাখলে
+  বা `settings.py` এ `REPORT_PDF_FONT = BASE_DIR / 'path/to/font.ttf'` দিলে অক্ষর আসবে; তবে reportlab যুক্তাক্ষর (conjunct) জোড়া লাগাতে পারে না।
+  ফন্ট না থাকলে বাংলা অক্ষর `?` হয়। Excel এ পুরো বাংলা ঠিক যায়। বাংলা-ভরা report এর নিখুঁত PDF চাইলে আগের Print → "Save as PDF" ই সেরা।
+
+## ২. Due Reminders (Customers মেনুর নিচে)
+- পেজ: `/app/customers/due-reminders/` — যাদের কাছে বাকি, বাকির পরিমাণ, সবচেয়ে পুরনো বাকির বয়স।
+- প্রতিটা customer এর পাশে **WhatsApp** ও **SMS** বোতাম: চাপলে বার্তা লেখা অবস্থায় WhatsApp/SMS app খোলে — **পাঠানোর বোতাম দোকানি নিজে চাপেন**।
+  (SMS বোতাম মোবাইলে কাজ করে; ডেস্কটপে WhatsApp বা **Copy** ব্যবহার করুন।)
+- বার্তার ছাঁচ "Edit message" থেকে বদলানো যায় (`{name} {amount} {invoices} {days} {shop} {phone}`); এই browser এ মনে থাকে।
+- "Reminded 3 days ago" চিহ্ন শুধু ওই browser এ থাকে; সার্ভারে কিছু জমা হয় না (migration লাগে না)।
+- বাকির হিসাব Customers পেজের সাথে এক: মোট বিক্রি − মোট পাওয়া − advance।
+- **স্বয়ংক্রিয় SMS** (নিজে নিজে সবাইকে পাঠানো) করতে SMS gateway (যেমন BulkSMSBD/SSL Wireless) লাগে — পেইড সার্ভিস; gateway বাছলে যোগ করা যাবে।
+- API: `GET /api/reports/customer-due-reminders/?q=&min_days=&min_amount=&template=`
+
+## ৩. একটা ভুল ঠিক করা হয়েছে
+- **Profit/Loss** এ শেষ তারিখের বিক্রি বাদ পড়ত (যেমন "This month" এ আজকের বিক্রি)। এখন পুরো শেষ দিন ধরা হয়।
+
+## ৪. পরীক্ষা
+```bash
+pip install -r requirements.txt
+python manage.py check
+python manage.py test reports
+```
+
+---
+
 # একটাই ব্যবসা — Company সরানোর আপডেট (WIP৩)
 
 **অবস্থা:** Python কোড থেকে Company পুরো সরানো হয়েছে (মডেল, সিরিয়ালাইজার, ভিউ, admin, shop, web, commands, tests)।
@@ -125,3 +160,12 @@ python tools/tests/test_sync.py    # offline sync, duplicate, stock conflict, au
 - Flutter অংশ এই পরিবেশে compile করা যায়নি (Flutter SDK নেই) — `flutter analyze` চালিয়ে কোনো error থাকলে জানাবেন।
 - Offline এ account balance / customer due তাৎক্ষণিক বদলায় না, sync এর পরে ঠিক হয়।
 - পুরনো (allocation ছাড়া) "overall" receipt delete করা যায় না — কোন invoice এ কত বসেছিল তার রেকর্ড নেই।
+
+## ৯. Low stock সতর্কতা (Dashboard + অ্যাপ খোলার সময়)
+- যে product **active** এবং `stock_qty <= alert_quantity` (প্রতিটা product এর নিজের alert সংখ্যা) — সেগুলোই সতর্কতায় আসে। নতুন field বা migration লাগে না।
+- **অ্যাপ খোলার সময়:** web app এর প্রথম পাতা খুললেই (প্রতিটা browser session এ একবার) একটা popup এ কোন product শেষ/কম দেখায়। "Dismiss" চাপলে বন্ধ হয়; browser বন্ধ করে আবার খুললে আবার আসে।
+- **Dashboard:** একদম উপরে সবসময় একটা banner (শেষ product থাকলে লাল, নাহলে হলুদ) + "View list" বোতাম। "Restock soon" তালিকাও এখন একই নিয়মে চলে।
+- Dashboard এর "Stock alerts" সংখ্যা এখন শুধু active product ধরে (আগে বন্ধ করা product ও গুনত) — Products পেজের সাথে মিলে গেল।
+- যারা Dashboard / Products / Purchases / Reports এর কোনোটা দেখতে পায় না, তাদের কিছু দেখায় না।
+- API (Flutter app ও ব্যবহার করতে পারে): `GET /api/reports/low-stock-alert/` → `data.report[]` (সবচেয়ে কম stock আগে, সর্বোচ্চ ৫০টা) + `data.summary` (`total_low_stock_items`, `critical_items`, `running_low`)।
+- পরীক্ষা: `python manage.py test reports.test_low_stock_alert`

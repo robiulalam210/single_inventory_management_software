@@ -1,5 +1,5 @@
 """
-Web software এর প্রতিটা page এ লাগে: menu, user এর নাম/ছবি, company, মেয়াদের সতর্কতা।
+Web software এর প্রতিটা page এ লাগে: menu, user এর নাম/ছবি, company, মেয়াদের সতর্কতা, low stock সতর্কতা চালু কি না।
 শুধু /app/ এর page এ কাজ করে — Django admin বা API তে কিছু যোগ করে না।
 """
 from .menu import build_menu
@@ -27,6 +27,12 @@ def web_shell(request):
 
     expiry = None
 
+    # Low stock সতর্কতা শুধু তাদের দেখায় যারা stock/dashboard সম্পর্কিত কিছু দেখার অনুমতি পান
+    # (API ও একই চারটা অনুমতি মানে — reports/views.py LowStockAlertView)
+    perms = user.get_permissions() if hasattr(user, 'get_permissions') else {}
+    low_stock_enabled = bool(user.is_superuser) or any(
+        (perms.get(m) or {}).get('view') for m in ('dashboard', 'products', 'purchases', 'reports'))
+
     picture = getattr(user, 'profile_picture', None)
     logo = getattr(company, 'logo', None)
     return {
@@ -43,4 +49,5 @@ def web_shell(request):
             'logo': logo.url if logo else None,
         },
         'web_expiry': expiry,
+        'web_low_stock': low_stock_enabled,
     }

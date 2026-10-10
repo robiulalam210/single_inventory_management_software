@@ -1,0 +1,125 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/due_reminders.js' %}"></script>{% endblock %}
+{% block content %}
+<div x-data="dueReminders()">
+
+  <section class="panel filters no-print">
+    <p class="muted" style="margin:0 0 10px">Customers who still owe you money. Tap <b>WhatsApp</b> or <b>SMS</b> to open a ready-written message — you press send yourself.</p>
+    <div class="f-row">
+      <label class="f-search">
+        {% icon "search" 18 %}
+        <input type="search" x-model="f.q" placeholder="Search name or phone" aria-label="Search customers">
+      </label>
+      <div class="seg seg-sm" role="tablist" aria-label="Sort">
+        <template x-for="o in sorts" :key="o.key">
+          <button type="button" :class="{ 'is-on': f.sort === o.key }" @click="f.sort = o.key" x-text="o.label"></button>
+        </template>
+      </div>
+    </div>
+    <div class="f-row">
+      <div class="chips" role="radiogroup" aria-label="Overdue for">
+        <template x-for="o in dayOpts" :key="o[0]">
+          <button type="button" class="chip" role="radio" :aria-checked="(f.days === o[0]).toString()"
+                  :class="{ 'is-on': f.days === o[0] }" @click="f.days = o[0]" x-text="o[1]"></button>
+        </template>
+      </div>
+      <div class="f-combos">
+        <button type="button" class="btn-link" x-show="filtered" x-cloak @click="clearAll()">{% icon "filter-x" 16 %} Reset</button>
+      </div>
+    </div>
+    <div class="rp-bar" style="margin-top:10px">
+      <button type="button" class="btn btn-ghost" @click="tplOpen = !tplOpen" :aria-expanded="tplOpen.toString()">{% icon "pencil" 16 %} <span x-text="tplOpen ? 'Hide message' : 'Edit message'"></span></button>
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-ghost" @click="print()">{% icon "printer" 16 %} Print list</button>
+    </div>
+    <div class="rm-tpl" x-show="tplOpen" x-cloak>
+      <label for="rm-tpl-text" class="muted">Message — use <code>{name}</code> <code>{amount}</code> <code>{invoices}</code> <code>{days}</code> <code>{shop}</code> <code>{phone}</code></label>
+      <textarea id="rm-tpl-text" class="in" rows="4" x-model="tpl"></textarea>
+      <p class="muted" style="margin:6px 0 0"><b>Preview:</b> <span x-text="preview"></span></p>
+      <button type="button" class="btn-link" @click="resetTpl()">Use the standard message</button>
+    </div>
+  </section>
+
+  <div class="sumbar sb-3" aria-live="polite">
+    <div><span>Customers owing</span><b x-text="summary ? summary.total_customers : '—'"></b></div>
+    <div><span>Total due</span><b :class="{ 'txt-due': summary && summary.total_due > 0 }" x-text="summary ? taka(summary.total_due) : '—'"></b></div>
+    <div><span>Oldest due</span><b x-text="summary ? summary.oldest_days + (summary.oldest_days === 1 ? ' day' : ' days') : '—'"></b>
+      <small class="sum-note" x-show="summary && summary.without_phone" x-text="summary && (summary.without_phone + (summary.without_phone === 1 ? ' customer has' : ' customers have') + ' no usable phone number')"></small></div>
+  </div>
+
+  <section class="panel">
+    <template x-if="error">
+      <div class="empty">
+        <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2>Couldn't load the due list</h2><p x-text="error"></p>
+        <button class="btn btn-ghost" @click="fetch()">Try again</button>
+      </div>
+    </template>
+    <template x-if="!error">
+      <div>
+        <table class="dt" :class="{ 'is-loading': loading }">
+          <thead>
+            <tr>
+              <th>Customer</th>
+              <th class="hide-md">Phone</th>
+              <th class="num">Owes you</th>
+              <th class="hide-md">Oldest due</th>
+              <th class="no-print">Send reminder</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in shown" :key="r.customer_id">
+              <tr>
+                <td data-k="Customer">
+                  <b x-text="r.name"></b>
+                  <span class="sub"><span x-text="r.client_no"></span> · <span x-text="r.invoice_count + (r.invoice_count === 1 ? ' invoice' : ' invoices')"></span></span>
+                </td>
+                <td class="hide-md" data-k="Phone">
+                  <span x-text="r.phone || '—'"></span>
+                  <span class="sub txt-due" x-show="r.phone && !r.phone_intl">Number not recognised</span>
+                </td>
+                <td class="num" data-k="Owes you">
+                  <b class="txt-due" x-text="taka(r.net_due)"></b>
+                  <span class="sub txt-adv" x-show="r.advance_balance > 0" x-text="'after ' + taka(r.advance_balance) + ' advance'"></span>
+                </td>
+                <td class="hide-md" data-k="Oldest due">
+                  <span class="pill" :class="ageCls(r)" x-text="age(r)"></span>
+                  <span class="sub" x-text="fmtDate(r.oldest_due_date)"></span>
+                </td>
+                <td class="no-print" data-k="Send">
+                  <div class="rm-act">
+                    <template x-if="r.phone_intl">
+                      <div class="rm-act">
+                        <a class="btn btn-primary btn-sm" :href="wa(r)" target="_blank" rel="noopener" @click="mark(r)">WhatsApp</a>
+                        <a class="btn btn-ghost btn-sm" :href="sms(r)" @click="mark(r)">SMS</a>
+                      </div>
+                    </template>
+                    <button type="button" class="btn btn-ghost btn-sm" @click="copy(r)">Copy</button>
+                  </div>
+                  <span class="sub" x-show="remindedText(r)" x-text="remindedText(r)"></span>
+                </td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !rows.length ? 6 : 0)" :key="'sk' + i">
+              <tr class="sk-row"><td colspan="5"><span class="sk-line"></span></td></tr>
+            </template>
+          </tbody>
+        </table>
+        <template x-if="!loading && !shown.length">
+          <div class="empty">
+            <div class="tile">{% icon "check-circle" 26 %}</div>
+            <h2 x-text="rows.length ? 'No customers match' : 'Nobody owes you right now'"></h2>
+            <p x-text="rows.length ? 'Try another search or clear the filters.' : 'When a customer has a balance to pay, they will show up here.'"></p>
+            <button class="btn btn-ghost" x-show="filtered" @click="clearAll()">Reset filters</button>
+          </div>
+        </template>
+        <p class="muted no-print" style="padding:10px 16px;margin:0" x-show="shown.length && shown.length !== rows.length"
+           x-text="'Showing ' + shown.length + ' of ' + rows.length + ' — ' + taka(shownTotal) + ' due'"></p>
+      </div>
+    </template>
+  </section>
+
+  <div class="toast" x-show="toast" x-cloak x-text="toast" role="status"></div>
+</div>
+{% endblock %}

@@ -23,6 +23,15 @@
     </div>
   </div>
 
+  {# ── low stock banner (data: $store.lowStock, web/js/low_stock.js) ── #}
+  <template x-if="$store.lowStock && $store.lowStock.has">
+    <div class="notice ls-banner" :class="$store.lowStock.out > 0 ? 'notice-error' : 'notice-warn'" role="alert">
+      {% icon "alert" 18 %}
+      <span><b x-text="$store.lowStock.total + ' product' + ($store.lowStock.total === 1 ? '' : 's') + ' need restocking'"></b> — <span x-text="$store.lowStock.headline"></span>.</span>
+      <button type="button" class="btn btn-ghost btn-sm" @click="$store.lowStock.show()">View list</button>
+    </div>
+  </template>
+
   {% if shop_url %}
   <section class="panel dash-shop">
     <div class="panel-head">

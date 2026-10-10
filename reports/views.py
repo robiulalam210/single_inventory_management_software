@@ -417,6 +417,50 @@ class LowStockReportView(BaseReportView):
         except Exception as e:
             return self.handle_exception(e)
 
+
+# --------------------
+# Low Stock সতর্কতা — dashboard ও web app খোলার সময়ের popup এর data
+# --------------------
+class LowStockAlertView(BaseReportView):
+    """
+    নিয়ম Product.get_low_stock_products() এর মতোই: active product, stock_qty <= alert_quantity।
+    (Low Stock *report* এ ব্যবহারকারীর বাছা threshold চলে; এখানে প্রতিটা product এর নিজের alert_quantity।)
+    row এর নাম Low Stock report এর সাথে মেলানো — তাই dashboard এর "Restock soon" তালিকাও এখান থেকেই আসে।
+    """
+    MAX_ITEMS = 50
+
+    def get(self, request):
+        try:
+            from .perms import user_has_perm
+            if not any(user_has_perm(request.user, m) for m in ('dashboard', 'products', 'purchases', 'reports')):
+                return custom_response(False, "You do not have permission to view stock alerts", None, 403)
+
+            alerts = Product.objects.filter(is_active=True, stock_qty__lte=F('alert_quantity'))
+            total = alerts.count()
+            out_of_stock = alerts.filter(stock_qty=0).count()
+
+            rows = alerts.select_related('category', 'brand').order_by('stock_qty', 'name')[:self.MAX_ITEMS]
+            report = [{
+                'sl': i,
+                'product_id': p.id,
+                'product_name': p.name,
+                'category': p.category.name if p.category else '',
+                'brand': p.brand.name if p.brand else '',
+                'alert_quantity': p.alert_quantity,
+                'total_stock_quantity': p.stock_qty,
+            } for i, p in enumerate(rows, start=1)]
+
+            return custom_response(True, "Low stock alert fetched successfully", {
+                'report': report,
+                'summary': {
+                    'total_low_stock_items': total,
+                    'critical_items': out_of_stock,
+                    'running_low': total - out_of_stock,
+                },
+            })
+        except Exception as e:
+            return self.handle_exception(e)
+
 # --------------------
 # Top Sold Products Report - FIXED VERSION
 # --------------------
@@ -1262,7 +1306,12 @@ class ProfitLossReportView(BaseReportView):
             # Sales data
             sales_query = Sale.objects.filter()
             if start and end:
-                sales_query = sales_query.filter(sale_date__range=[start, end])  # Fixed: removed extra __date
+                # FIX: sale_date DateTimeField — তারিখ (date) দিয়ে range করলে শেষ দিনের বিক্রি বাদ পড়ত
+                # (শেষ তারিখ ধরা হতো মধ্যরাত ০০:০০ — তাই "এই মাস" এ আজকের বিক্রি Profit/Loss এ আসত না)।
+                sales_query = sales_query.filter(sale_date__range=[
+                    make_aware(datetime.combine(start, datetime.min.time())),
+                    make_aware(datetime.combine(end, datetime.max.time())),
+                ])
             
             sales_data = sales_query.aggregate(
                 total_sales=Sum('grand_total'),
@@ -1772,11 +1821,14 @@ class DashboardSummaryView(BaseReportView):
             )
 
             # --- STOCK ALERTS ---
+            # শুধু active product — Low Stock সতর্কতা (LowStockAlertView) ও Products পেজের সাথে একই নিয়ম
             low_stock_count = Product.objects.filter(
+                is_active=True,
                 stock_qty__lte=F('alert_quantity'),
                 stock_qty__gt=0
             ).count()
             out_of_stock_count = Product.objects.filter(
+                is_active=True,
                 stock_qty=0
             ).count()
 

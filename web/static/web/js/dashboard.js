@@ -2,7 +2,7 @@
  * My Dashboard — desktop app এর dashboard এর একই data, একই API থেকে।
  *  • /api/reports/dashboard/?dateFilter=  → বিক্রি, কেনা, খরচ, লাভ, টাকার প্রবাহ, stock সতর্কতা, সাম্প্রতিক কাজ
  *  • /api/accounts/                       → account balance (Accounts দেখার অনুমতি থাকলে)
- *  • /api/reports/top-products/ , low-stock/ → (Reports দেখার অনুমতি থাকলে)
+ *  • /api/reports/top-products/ , low-stock-alert/ → (Reports দেখার অনুমতি থাকলে)
  *  • /api/reports/dashboard-trends/?days=   → চার্ট: শেষ ৭/৩০ দিনের বিক্রি-কেনা-খরচ + খরচের head ভাগ
  * একটা অংশ ব্যর্থ হলে বাকিগুলো ঠিকই দেখায়।
  */
@@ -106,7 +106,7 @@ function dashboard(perms) {
         jobs.push(App.api('/api/reports/top-products/', { query: { start: range.start_date, end: range.end_date } })
           .then(r => { this.top = ((r.data && r.data.report) || []).slice(0, 5); })
           .catch(() => { this.top = []; }));
-        jobs.push(App.api('/api/reports/low-stock/')
+        jobs.push(App.api('/api/reports/low-stock-alert/')
           .then(r => { this.low = ((r.data && r.data.report) || []).slice(0, 6); })
           .catch(() => { this.low = []; }));
       }

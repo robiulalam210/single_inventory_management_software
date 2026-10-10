@@ -44,8 +44,11 @@
     <div class="rp-bar" style="margin-top:10px" x-show="!needs">
       <span class="spacer"></span>
       <button type="button" class="btn btn-ghost" @click="print()">{% icon "printer" 16 %} Print</button>
-      <button type="button" class="btn btn-ghost" x-show="cfg.cols" @click="exportCsv()" :disabled="exporting"><span x-text="exporting ? 'Exporting…' : 'Download CSV'"></span></button>
+      <button type="button" class="btn btn-ghost" x-show="canExport" x-cloak @click="download('xlsx')" :disabled="!!exporting"><span x-text="exporting === 'xlsx' ? 'Preparing…' : 'Download Excel'"></span></button>
+      <button type="button" class="btn btn-ghost" x-show="canExport" x-cloak @click="download('pdf')" :disabled="!!exporting"><span x-text="exporting === 'pdf' ? 'Preparing…' : 'Download PDF'"></span></button>
+      <button type="button" class="btn btn-ghost" x-show="cfg.cols" @click="exportCsv()" :disabled="!!exporting"><span x-text="exporting === 'csv' ? 'Exporting…' : 'Download CSV'"></span></button>
     </div>
+    <p class="muted" x-show="exportError" x-cloak x-text="exportError" role="alert" style="margin:8px 0 0;color:var(--red)"></p>
   </section>
 
   <template x-if="needs">
