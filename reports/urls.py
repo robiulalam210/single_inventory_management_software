@@ -14,6 +14,7 @@ urlpatterns = [
     path('bad-stock/', views.BadStockReportView.as_view(), name='bad-stock-report'),
     path('stock/', views.StockReportView.as_view(), name='stock-report'),
     path('dashboard/', views.DashboardSummaryView.as_view(), name='dashboard-summary'),
+    path('dashboard-trends/', views.DashboardTrendsView.as_view(), name='dashboard-trends'),
 
     path('supplier-due-advance/', views.SupplierDueAdvanceReportView.as_view(), name='supplier-due-advance-report'),
     path('supplier-ledger/', views.SupplierLedgerReportView.as_view(), name='supplier-ledger-report'),

@@ -1960,3 +1960,83 @@ class DashboardSummaryView(BaseReportView):
             import traceback
             traceback.print_exc()
             return self.handle_exception(e)
+
+
+class DashboardTrendsView(BaseReportView):
+    """
+    Dashboard এর চার্টের data — শেষ ৭ বা ৩০ দিনের প্রতিদিনের বিক্রি / কেনা / খরচ,
+    আর ওই সময়ের খরচ head অনুযায়ী ভাগ।
+    GET /api/reports/dashboard-trends/?days=7   (days: 7 অথবা 30, ডিফল্ট 7)
+
+    DB তে TruncDate ব্যবহার করা হয়নি: MySQL এ timezone table না থাকলে সেটা NULL দেয়।
+    তাই সীমিত দিনের সারি এনে Python এ দিন অনুযায়ী যোগ করা হয়েছে (৩০ দিনে সারি কম, দ্রুত)।
+    """
+
+    def get(self, request):
+        try:
+            try:
+                days = int(request.GET.get('days', 7))
+            except (TypeError, ValueError):
+                days = 7
+            if days not in (7, 30):
+                days = 7
+
+            end_date = timezone.localdate()
+            start_date = end_date - timedelta(days=days - 1)
+            day_list = [start_date + timedelta(days=i) for i in range(days)]
+            index = {d: i for i, d in enumerate(day_list)}
+
+            sales = [0.0] * days
+            purchases = [0.0] * days
+            expenses = [0.0] * days
+
+            # --- বিক্রি (sale_date = DateTimeField, local দিন ধরে ভাগ) ---
+            start_dt = timezone.make_aware(datetime.combine(start_date, datetime.min.time()))
+            end_dt = timezone.make_aware(datetime.combine(end_date, datetime.max.time()))
+            for sale_date, total in Sale.objects.filter(
+                sale_date__gte=start_dt, sale_date__lte=end_dt
+            ).values_list('sale_date', 'grand_total'):
+                i = index.get(timezone.localtime(sale_date).date())
+                if i is not None:
+                    sales[i] += float(total or 0)
+
+            # --- কেনা (purchase_date = DateField) ---
+            for p_date, total in Purchase.objects.filter(
+                purchase_date__gte=start_date, purchase_date__lte=end_date
+            ).values_list('purchase_date', 'grand_total'):
+                i = index.get(p_date)
+                if i is not None:
+                    purchases[i] += float(total or 0)
+
+            # --- খরচ (expense_date = DateField) + head অনুযায়ী ভাগ ---
+            by_head = {}
+            for e_date, amount, head_name in Expense.objects.filter(
+                expense_date__gte=start_date, expense_date__lte=end_date
+            ).values_list('expense_date', 'amount', 'head__name'):
+                amount = float(amount or 0)
+                i = index.get(e_date)
+                if i is not None:
+                    expenses[i] += amount
+                name = head_name or 'Other'
+                by_head[name] = by_head.get(name, 0.0) + amount
+
+            ranked = sorted(by_head.items(), key=lambda kv: kv[1], reverse=True)
+            top_heads = [{'name': n, 'total': round(v, 2)} for n, v in ranked[:5] if v > 0]
+            rest = sum(v for _, v in ranked[5:])
+            if rest > 0:
+                top_heads.append({'name': 'Other', 'total': round(rest, 2)})
+
+            return custom_response(True, "Dashboard trends fetched successfully", {
+                'days': days,
+                'start_date': start_date.isoformat(),
+                'end_date': end_date.isoformat(),
+                'labels': [d.isoformat() for d in day_list],
+                'sales': [round(v, 2) for v in sales],
+                'purchases': [round(v, 2) for v in purchases],
+                'expenses': [round(v, 2) for v in expenses],
+                'expense_by_head': top_heads,
+            })
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return self.handle_exception(e)

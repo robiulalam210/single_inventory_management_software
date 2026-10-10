@@ -391,6 +391,25 @@ a:hover { color: var(--blue-ink); }
 .stock-pill.is-out { background: var(--red-wash); color: var(--red); }
 .stock-pill.is-low { background: var(--amber-wash); color: var(--amber); }
 
+/* ───── Dashboard charts (Chart.js) ───── */
+.chart-wrap { padding: 12px 20px 18px; }
+.chart-box { position: relative; height: 290px; transition: opacity .2s ease; }
+.chart-box-sm { height: 290px; }
+.chart-box.is-busy { opacity: .55; }
+.chart-box canvas { max-width: 100%; }
+.chart-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 290px; text-align: center; color: var(--muted); font-size: 13.5px; }
+.chart-empty p { margin: 0; max-width: 32ch; }
+.chart-empty svg { opacity: .7; }
+/* Best sellers: নামের নিচে ছোট তুলনামূলক বার */
+.rank .row-amt { min-width: 92px; }  /* সব সারিতে বারের দৈর্ঘ্য সমান থাকে */
+.rank-bar { height: 4px; margin-top: 6px; background: var(--canvas); border-radius: 4px; overflow: hidden; }
+.rank-bar i { display: block; height: 100%; background: var(--blue); border-radius: 4px; transition: width .45s ease; }
+@media (prefers-reduced-motion: reduce) { .chart-box, .rank-bar i { transition: none; } }
+@media (max-width: 640px) {
+  .chart-wrap { padding: 8px 12px 14px; }
+  .chart-box, .chart-box-sm, .chart-empty { height: 250px; }
+}
+
 @media (max-width: 1200px) {
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dash-grid { grid-template-columns: 1fr 1fr; }
