@@ -1,5 +1,5 @@
 from django.db import models
-from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.models import AbstractUser, UserManager
 from django.utils.translation import gettext_lazy as _
 from datetime import date, timedelta
 from decimal import Decimal
@@ -52,7 +52,18 @@ class BusinessProfile(models.Model):
         return self.name
 
 
+class AppUserManager(UserManager):
+    """`manage.py createsuperuser` এ role না দিলে ডিফল্ট STAFF হয়ে যেত এবং
+    User.save() তাকে superuser থেকে নামিয়ে দিত। তাই এখানে role = SUPER_ADMIN বসানো হয়।"""
+
+    def create_superuser(self, username, email=None, password=None, **extra_fields):
+        extra_fields.setdefault('role', 'SUPER_ADMIN')
+        return super().create_superuser(username, email, password, **extra_fields)
+
+
 class User(AbstractUser):
+    objects = AppUserManager()
+
     class Role(models.TextChoices):
         SUPER_ADMIN = "SUPER_ADMIN", _("Super Admin")
         ADMIN = "ADMIN", _("Admin")
@@ -179,6 +190,9 @@ class User(AbstractUser):
         ]
 
     def save(self, *args, **kwargs):
+        # নতুন ইউজার is_superuser=True নিয়ে এলে (যেমন Django admin) role ঠিক করে দিই
+        if self.pk is None and self.is_superuser and self.role != self.Role.SUPER_ADMIN:
+            self.role = self.Role.SUPER_ADMIN
         # সুপারইউজারের জন্য বিশেষ হ্যান্ডলিং
         if self.role == self.Role.SUPER_ADMIN:
             self.is_staff = True
