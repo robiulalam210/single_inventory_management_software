@@ -205,6 +205,8 @@
       ],
     },
   };
+  // সার্ভার থেকে Excel/PDF নামানো যায় যেসব report এ (reports/exports.py এর REPORT_EXPORTS এর সাথে মেলানো)
+  const EXPORTABLE = ['sales', 'purchases', 'profit-loss', 'expenses', 'customer-due', 'supplier-due', 'stock', 'low-stock', 'top-products'];
   window.REPORT_TITLES = Object.fromEntries(Object.entries(REPORTS).map(([k, v]) => [k, v.title]));
 
   window.reportPage = function (key, init) {
@@ -216,7 +218,7 @@
       f: Object.assign({ preset: cfg.period || 'month', from: '', to: '' }, defaults()),
       opts: {},
       page: 1, rows: [], meta: { count: 0, total_pages: 1 }, summary: null, stmt: null,
-      loading: !cfg.require, error: null, exporting: false, _req: 0, _t: null,
+      loading: !cfg.require, error: null, exporting: '', exportError: '', _req: 0, _t: null,
 
       init() {
         const p = new URLSearchParams(location.search);
@@ -355,9 +357,36 @@
       },
       print() { window.print(); },
 
+      get canExport() { return EXPORTABLE.indexOf(key) !== -1; },
+
+      // Excel / PDF — সার্ভার পুরো ফলাফল (সব পাতা) নিয়ে ফাইল বানায়; filter গুলো screen এর মতোই
+      async download(fmt) {
+        if (this.exporting || this.needs) return;
+        this.exporting = fmt; this.exportError = '';
+        try {
+          const qs = new URLSearchParams(this.query(1, 1000));
+          qs.delete('page'); qs.delete('page_size'); qs.set('fmt', fmt);
+          const res = await fetch('/api/reports/export/' + key + '/?' + qs.toString(), { credentials: 'same-origin' });
+          if (!res.ok) {
+            let msg = 'Server said ' + res.status;
+            try { msg = (await res.json()).message || msg; } catch (e) { /* JSON নয় */ }
+            throw new Error(msg);
+          }
+          const blob = await res.blob();
+          const cd = res.headers.get('Content-Disposition') || '';
+          const m = /filename="?([^";]+)"?/.exec(cd);
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = m ? m[1] : key + '-' + iso(today()) + '.' + fmt;
+          document.body.appendChild(a); a.click(); a.remove();
+          setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+        } catch (e) { this.exportError = 'Could not download the ' + (fmt === 'pdf' ? 'PDF' : 'Excel file') + ': ' + e.message; }
+        this.exporting = '';
+      },
+
       async exportCsv() {
         if (this.exporting || this.needs) return;
-        this.exporting = true;
+        this.exporting = 'csv'; this.exportError = '';
         try {
           let all = [];
           if (cfg.paged) {
@@ -376,8 +405,8 @@
           a.download = key + '-' + iso(today()) + '.csv';
           document.body.appendChild(a); a.click(); a.remove();
           setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-        } catch (e) { this.error = 'Could not export: ' + e.message; }
-        this.exporting = false;
+        } catch (e) { this.exportError = 'Could not export: ' + e.message; }
+        this.exporting = '';
       },
     };
   };

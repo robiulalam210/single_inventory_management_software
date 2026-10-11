@@ -832,6 +832,15 @@ def audit_log_view(request):
     return render(request, 'web/security/audit.html', {'page_title': 'Audit Log'})
 
 
+@web_login_required
+@never_cache
+def due_reminders_view(request):
+    """Due Reminders — যাদের কাছে বাকি আছে তাদের তালিকা, আর WhatsApp / SMS এ রিমাইন্ডার পাঠানোর লিংক।"""
+    if not has_perm(request.user, 'customers', 'view'):
+        return forbidden(request, 'Due Reminders')
+    return render(request, 'web/customers/due_reminders.html', {'page_title': 'Due Reminders'})
+
+
 REPORT_TITLES = {
     'sales': 'Sales Report', 'purchases': 'Purchase Report', 'profit-loss': 'Profit / Loss',
     'top-products': 'Top Selling Products', 'low-stock': 'Low Stock', 'stock': 'Stock Report',

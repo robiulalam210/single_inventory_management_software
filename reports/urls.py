@@ -1,6 +1,8 @@
 # reports/urls.py
 from django.urls import path
 from . import views
+from .export_views import ReportExportView
+from .reminder_views import CustomerDueReminderView
 
 urlpatterns = [
     path('sales/', views.SalesReportView.as_view(), name='sales-report'),
@@ -11,12 +13,19 @@ urlpatterns = [
     path('sales-returns/', views.SalesReturnReportView.as_view(), name='sales-return-report'),
     path('top-products/', views.TopSoldProductsReportView.as_view(), name='top-products-report'),
     path('low-stock/', views.LowStockReportView.as_view(), name='low-stock-report'),
+    path('low-stock-alert/', views.LowStockAlertView.as_view(), name='low-stock-alert'),
     path('bad-stock/', views.BadStockReportView.as_view(), name='bad-stock-report'),
     path('stock/', views.StockReportView.as_view(), name='stock-report'),
     path('dashboard/', views.DashboardSummaryView.as_view(), name='dashboard-summary'),
+    path('dashboard-trends/', views.DashboardTrendsView.as_view(), name='dashboard-trends'),
 
     path('supplier-due-advance/', views.SupplierDueAdvanceReportView.as_view(), name='supplier-due-advance-report'),
     path('supplier-ledger/', views.SupplierLedgerReportView.as_view(), name='supplier-ledger-report'),
     path('customer-due-advance/', views.CustomerDueAdvanceReportView.as_view(), name='customer-due-advance-report'),
     path('customer-ledger/', views.CustomerLedgerReportView.as_view(), name='customer-ledger-report'),
+
+    # Excel / PDF download — /api/reports/export/<key>/?fmt=xlsx|pdf
+    path('export/<str:key>/', ReportExportView.as_view(), name='report-export'),
+    # বাকি টাকার রিমাইন্ডার তালিকা (WhatsApp / SMS লিংক সহ)
+    path('customer-due-reminders/', CustomerDueReminderView.as_view(), name='customer-due-reminders'),
 ]

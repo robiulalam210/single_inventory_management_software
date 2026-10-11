@@ -391,6 +391,25 @@ a:hover { color: var(--blue-ink); }
 .stock-pill.is-out { background: var(--red-wash); color: var(--red); }
 .stock-pill.is-low { background: var(--amber-wash); color: var(--amber); }
 
+/* ───── Dashboard charts (Chart.js) ───── */
+.chart-wrap { padding: 12px 20px 18px; }
+.chart-box { position: relative; height: 290px; transition: opacity .2s ease; }
+.chart-box-sm { height: 290px; }
+.chart-box.is-busy { opacity: .55; }
+.chart-box canvas { max-width: 100%; }
+.chart-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 290px; text-align: center; color: var(--muted); font-size: 13.5px; }
+.chart-empty p { margin: 0; max-width: 32ch; }
+.chart-empty svg { opacity: .7; }
+/* Best sellers: নামের নিচে ছোট তুলনামূলক বার */
+.rank .row-amt { min-width: 92px; }  /* সব সারিতে বারের দৈর্ঘ্য সমান থাকে */
+.rank-bar { height: 4px; margin-top: 6px; background: var(--canvas); border-radius: 4px; overflow: hidden; }
+.rank-bar i { display: block; height: 100%; background: var(--blue); border-radius: 4px; transition: width .45s ease; }
+@media (prefers-reduced-motion: reduce) { .chart-box, .rank-bar i { transition: none; } }
+@media (max-width: 640px) {
+  .chart-wrap { padding: 8px 12px 14px; }
+  .chart-box, .chart-box-sm, .chart-empty { height: 250px; }
+}
+
 @media (max-width: 1200px) {
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .dash-grid { grid-template-columns: 1fr 1fr; }
@@ -1806,3 +1825,58 @@ a.hd-total:hover { background: var(--canvas); }
 .dash-shop .panel-body { padding-top: 12px; }
 .set-grid .field.wide .set-check { margin-top: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--soft); }
 .shop-page .f-search svg { flex: none; }
+
+/* ───── Due Reminders ───── */
+.rm-act { display: flex; gap: 6px; flex-wrap: wrap; }
+.rm-tpl { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.rm-tpl textarea { margin-top: 6px; }
+.rm-tpl code { background: var(--canvas); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+a.btn { text-decoration: none; }
+
+/* ───── Low stock alert (popup + dashboard banner) ───── */
+.ls-banner { align-items: center; }
+.ls-banner > span { flex: 1; }
+.ls-banner .btn { flex: none; }
+.ls-modal { max-width: 460px; }
+.ls-icon { background: var(--amber-wash); color: var(--amber); }
+.ls-icon.is-out { background: var(--red-wash); color: var(--red); }
+.ls-sub { margin-bottom: 14px; }
+.ls-list { list-style: none; margin: 0 0 18px; padding: 0; border: 1px solid var(--line); border-radius: var(--r-md); max-height: 280px; overflow-y: auto; }
+.ls-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; }
+.ls-list li + li { border-top: 1px solid var(--line); }
+.ls-name { font-weight: 600; font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ls-list .stock-pill { flex: none; }
+.ls-more { margin: -10px 0 18px; font-size: 13px; color: var(--muted); }
+@media (max-width: 520px) {
+  .ls-banner { flex-wrap: wrap; }
+  .ls-banner .btn { margin-left: 28px; }
+}
+
+/* ==========================================================================
+   পেজ গাইড — ডান নিচের ভাসমান "গাইড" বোতাম + পপ-আপ (templates/web/_guide.html)
+   পেজের লেআউটে কোনো জায়গা নেয় না।
+   ========================================================================== */
+.guide-fab-wrap { position: fixed; right: 20px; bottom: 20px; z-index: 40; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+.guide-fab { display: inline-flex; align-items: center; gap: 7px; height: 42px; padding: 0 16px 0 13px; border: 0; border-radius: 999px; background: var(--blue); color: #fff; font: 600 14px var(--font); cursor: pointer; box-shadow: 0 10px 28px -8px rgba(37, 99, 235, .6); }
+.guide-fab:hover { background: var(--blue-ink); }
+.guide-fab:focus-visible { outline: none; box-shadow: var(--focus); }
+.guide-pop { width: min(400px, calc(100vw - 32px)); max-height: min(70vh, 560px); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--blue-line); border-radius: var(--r-lg); box-shadow: 0 18px 44px -10px rgba(15, 23, 42, .35); overflow: hidden; }
+.guide-pop-head { display: flex; align-items: center; gap: 10px; padding: 11px 12px; background: var(--blue-wash); border-bottom: 1px solid var(--blue-line); flex: none; }
+.guide-ic { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--blue); color: #fff; }
+.guide-ttl { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.35; }
+.guide-ttl b { font-size: 14px; font-weight: 600; color: var(--blue-ink); }
+.guide-ttl small { font-size: 12px; color: var(--muted); }
+.guide-pop-body { padding: 14px 14px 12px; overflow-y: auto; }
+.guide-steps { list-style: none; counter-reset: gstep; margin: 0; padding: 0; display: grid; gap: 10px; }
+.guide-steps li { counter-increment: gstep; position: relative; padding-left: 32px; font-size: 13.5px; line-height: 1.65; color: var(--ink-2); }
+.guide-steps li::before { content: counter(gstep, bengali); position: absolute; left: 0; top: 1px; width: 23px; height: 23px; border-radius: 50%; display: grid; place-items: center; background: var(--blue-wash); border: 1px solid var(--blue-line); color: var(--blue-ink); font-size: 12px; font-weight: 600; }
+.guide-steps strong { color: var(--ink); font-weight: 600; background: var(--tint); padding: 0 5px; border-radius: 5px; }
+.guide-tip { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 10px 14px; border-top: 1px solid var(--amber-line); background: var(--amber-wash); color: var(--amber-ink); font-size: 12.5px; line-height: 1.6; flex: none; }
+.guide-tip .ic { flex: none; margin-top: 3px; }
+.guide-tip strong { background: none; padding: 0; color: inherit; }
+@media (max-width: 640px) {
+  .guide-fab-wrap { right: 12px; bottom: 12px; }
+  .guide-fab span { display: none; }
+  .guide-fab { width: 44px; height: 44px; padding: 0; justify-content: center; }
+}
+@media print { .guide-fab-wrap { display: none !important; } }

@@ -18,6 +18,7 @@ urlpatterns = [
     path('purchases/new/', views.purchase_create_view, name='purchase_new'),
     path('suppliers/', views.suppliers_view, name='suppliers'),
     path('customers/', views.customers_view, name='customers'),
+    path('customers/due-reminders/', views.due_reminders_view, name='due_reminders'),
     path('products/', views.products_view, name='products'),
     path('accounts/', views.accounts_view, name='accounts'),
     path('units/', views.units_view, name='units'),

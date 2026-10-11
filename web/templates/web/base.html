@@ -9,6 +9,7 @@
   <link rel="icon" href="{% static 'web/img/favicon.svg' %}" type="image/svg+xml">
   <link rel="stylesheet" href="{% static 'web/css/app.css' %}">
   <script src="{% static 'web/js/app.js' %}"></script>
+  {% if web_low_stock %}<script src="{% static 'web/js/low_stock.js' %}"></script>{% endif %}
   <script defer src="{% static 'web/vendor/alpine-3.14.9.min.js' %}"></script>
   {% block head %}{% endblock %}
 </head>
@@ -123,6 +124,7 @@
       {% for message in messages %}
         <div class="notice notice-ok" role="status">{% icon "check-circle" 18 %}<span>{{ message }}</span></div>
       {% endfor %}
+      {% if web_guide %}{% include "web/_guide.html" with g=web_guide %}{% endif %}
       {% block content %}{% endblock %}
     </main>
   </div>
@@ -142,6 +144,8 @@
     </form>
   </div>
 </div>
+
+{% if web_low_stock %}{% include "web/_low_stock_alert.html" %}{% endif %}
 
 {% block scripts %}{% endblock %}
 </body>
