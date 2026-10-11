@@ -1,0 +1,34 @@
+{% load web_tags %}{# প্রতি পেজের বাংলা গাইড — ডান নিচের "গাইড" বোতামে চাপলে ভেসে ওঠে, পেজের জায়গা নেয় না। লেখা web/guides.py এ #}
+<div class="guide-fab-wrap no-print" x-data="pageGuide('{{ g.key }}')" @keydown.escape.window="open = false" @click.outside="open = false" x-cloak>
+  <section class="guide-pop" x-show="open" x-transition.opacity.duration.120ms role="dialog" aria-label="এই পেজের গাইড">
+    <header class="guide-pop-head">
+      <span class="guide-ic">{% icon "info" 18 %}</span>
+      <span class="guide-ttl"><b>এই পেজে কীভাবে কাজ করবেন</b><small>{{ g.lead }}</small></span>
+      <button type="button" class="icon-btn" @click="open = false" aria-label="বন্ধ করুন">{% icon "x" 18 %}</button>
+    </header>
+    <div class="guide-pop-body">
+      <ol class="guide-steps">
+        {% for step in g.steps %}<li>{{ step }}</li>{% endfor %}
+      </ol>
+    </div>
+    {% if g.tip %}<p class="guide-tip">{% icon "sparkle" 16 %}<span><b>মিনি টিপ:</b> {{ g.tip }}</span></p>{% endif %}
+  </section>
+  <button type="button" class="guide-fab" @click="toggle()" :aria-expanded="open.toString()" aria-expanded="false" title="এই পেজের গাইড">
+    {% icon "info" 18 %}<span>গাইড</span>
+  </button>
+</div>
+<script>
+  /* গাইড শুরুতে বন্ধ থাকে। প্রথমবার এই পেজে এলে বোতামটা একটু কাঁপে, যাতে চোখে পড়ে; একবার খুললে আর কাঁপে না। */
+  function pageGuide(key) {
+    var k = 'guide-seen:' + key, seen = false;
+    try { seen = localStorage.getItem(k) === '1'; } catch (e) {}
+    return {
+      open: false,
+      seen: seen,
+      toggle: function () {
+        this.open = !this.open;
+        if (this.open) { this.seen = true; try { localStorage.setItem(k, '1'); } catch (e) {} }
+      }
+    };
+  }
+</script>

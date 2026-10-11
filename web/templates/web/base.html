@@ -124,6 +124,7 @@
       {% for message in messages %}
         <div class="notice notice-ok" role="status">{% icon "check-circle" 18 %}<span>{{ message }}</span></div>
       {% endfor %}
+      {% if web_guide %}{% include "web/_guide.html" with g=web_guide %}{% endif %}
       {% block content %}{% endblock %}
     </main>
   </div>

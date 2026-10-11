@@ -1851,3 +1851,32 @@ a.btn { text-decoration: none; }
   .ls-banner { flex-wrap: wrap; }
   .ls-banner .btn { margin-left: 28px; }
 }
+
+/* ==========================================================================
+   পেজ গাইড — ডান নিচের ভাসমান "গাইড" বোতাম + পপ-আপ (templates/web/_guide.html)
+   পেজের লেআউটে কোনো জায়গা নেয় না।
+   ========================================================================== */
+.guide-fab-wrap { position: fixed; right: 20px; bottom: 20px; z-index: 40; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+.guide-fab { display: inline-flex; align-items: center; gap: 7px; height: 42px; padding: 0 16px 0 13px; border: 0; border-radius: 999px; background: var(--blue); color: #fff; font: 600 14px var(--font); cursor: pointer; box-shadow: 0 10px 28px -8px rgba(37, 99, 235, .6); }
+.guide-fab:hover { background: var(--blue-ink); }
+.guide-fab:focus-visible { outline: none; box-shadow: var(--focus); }
+.guide-pop { width: min(400px, calc(100vw - 32px)); max-height: min(70vh, 560px); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--blue-line); border-radius: var(--r-lg); box-shadow: 0 18px 44px -10px rgba(15, 23, 42, .35); overflow: hidden; }
+.guide-pop-head { display: flex; align-items: center; gap: 10px; padding: 11px 12px; background: var(--blue-wash); border-bottom: 1px solid var(--blue-line); flex: none; }
+.guide-ic { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--blue); color: #fff; }
+.guide-ttl { display: flex; flex-direction: column; min-width: 0; flex: 1; line-height: 1.35; }
+.guide-ttl b { font-size: 14px; font-weight: 600; color: var(--blue-ink); }
+.guide-ttl small { font-size: 12px; color: var(--muted); }
+.guide-pop-body { padding: 14px 14px 12px; overflow-y: auto; }
+.guide-steps { list-style: none; counter-reset: gstep; margin: 0; padding: 0; display: grid; gap: 10px; }
+.guide-steps li { counter-increment: gstep; position: relative; padding-left: 32px; font-size: 13.5px; line-height: 1.65; color: var(--ink-2); }
+.guide-steps li::before { content: counter(gstep, bengali); position: absolute; left: 0; top: 1px; width: 23px; height: 23px; border-radius: 50%; display: grid; place-items: center; background: var(--blue-wash); border: 1px solid var(--blue-line); color: var(--blue-ink); font-size: 12px; font-weight: 600; }
+.guide-steps strong { color: var(--ink); font-weight: 600; background: var(--tint); padding: 0 5px; border-radius: 5px; }
+.guide-tip { display: flex; gap: 8px; align-items: flex-start; margin: 0; padding: 10px 14px; border-top: 1px solid var(--amber-line); background: var(--amber-wash); color: var(--amber-ink); font-size: 12.5px; line-height: 1.6; flex: none; }
+.guide-tip .ic { flex: none; margin-top: 3px; }
+.guide-tip strong { background: none; padding: 0; color: inherit; }
+@media (max-width: 640px) {
+  .guide-fab-wrap { right: 12px; bottom: 12px; }
+  .guide-fab span { display: none; }
+  .guide-fab { width: 44px; height: 44px; padding: 0; justify-content: center; }
+}
+@media print { .guide-fab-wrap { display: none !important; } }

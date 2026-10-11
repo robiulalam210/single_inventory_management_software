@@ -2,6 +2,7 @@
 Web software এর প্রতিটা page এ লাগে: menu, user এর নাম/ছবি, company, মেয়াদের সতর্কতা, low stock সতর্কতা চালু কি না।
 শুধু /app/ এর page এ কাজ করে — Django admin বা API তে কিছু যোগ করে না।
 """
+from .guides import guide_for
 from .menu import build_menu
 
 
@@ -50,4 +51,6 @@ def web_shell(request):
         },
         'web_expiry': expiry,
         'web_low_stock': low_stock_enabled,
+        # পেজের উপরের বাংলা "কীভাবে কাজ করবেন" গাইড (web/guides.py)
+        'web_guide': guide_for(getattr(getattr(request, 'resolver_match', None), 'url_name', None)),
     }
