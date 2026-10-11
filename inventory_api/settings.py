@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     # Project apps
     'purchases',
     'products',
+    'stocktake',
     'sales',
     'returns',
     'branch_warehouse',

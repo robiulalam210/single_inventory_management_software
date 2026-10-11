@@ -107,9 +107,9 @@ urlpatterns = [
     path('supplier-payments/<int:pk>/cancel/', SupplierPaymentCancelAPIView.as_view(), name='supplier-payment-cancel'),
 
     path('reports/', include('reports.urls')),
+    path('stock/', include('stocktake.urls')),  # stock adjustment + stocktake
     path('sync/', include('offline_sync.urls')),  # offline sync + audit
 
-    path('shop/', include('shop.api_urls')),  # Online Shop API (Flutter অ্যাপ): /api/shop/orders/, /api/shop/settings/
     path('payroll/', include('payroll.urls')),
     path('expenses/', include('expenses.urls')),
     path('income/', include('income.urls')),

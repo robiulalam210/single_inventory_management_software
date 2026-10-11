@@ -132,6 +132,129 @@
         </div>
       </section>
 
+      {# ── monthly profit (bar) ── #}
+      <section class="panel span-2">
+        <div class="panel-head">
+          <h3>Monthly profit <span class="muted-inline" x-text="'· last ' + months + ' months'"></span></h3>
+          <div class="seg seg-sm" role="tablist" aria-label="Months shown">
+            <button type="button" role="tab" :aria-selected="(months === 6).toString()" :class="{ 'is-on': months === 6 }" @click="setMonths(6)">6 months</button>
+            <button type="button" role="tab" :aria-selected="(months === 12).toString()" :class="{ 'is-on': months === 12 }" @click="setMonths(12)">12 months</button>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <div class="chart-box" x-show="charts && monthlyHasData && !chartsError" x-cloak :class="{ 'is-busy': chartsLoading }">
+            <canvas id="chart-monthly" role="img" :aria-label="monthlySummary"></canvas>
+          </div>
+          <div class="chart-empty" x-show="charts && !monthlyHasData && !chartsError" x-cloak>
+            {% icon "income" 22 %}<p>No sales or expenses in the last <span x-text="months"></span> months.</p>
+          </div>
+          <div class="chart-empty" x-show="chartsError" x-cloak>
+            {% icon "alert" 22 %}<p x-text="chartsError"></p>
+            <button type="button" class="btn btn-ghost" @click="loadCharts()">Try again</button>
+          </div>
+          <div class="chart-empty" x-show="!charts && !chartsError"><p>Loading chart…</p></div>
+        </div>
+      </section>
+
+      {# ── account balance share (doughnut) ── #}
+      <section class="panel" x-show="perms.accounts">
+        <div class="panel-head">
+          <h3>Where the money sits</h3>
+          <span x-show="accountsHaveData" x-cloak x-text="taka(totalBalance)"></span>
+        </div>
+        <div class="chart-wrap">
+          <div class="chart-box chart-box-sm" x-show="accountsHaveData" x-cloak>
+            <canvas id="chart-accounts" role="img" :aria-label="accountsSummary"></canvas>
+          </div>
+          <div class="chart-empty chart-empty-sm" x-show="accounts && !accountsHaveData" x-cloak>
+            <p>No account has a positive balance yet.</p>
+          </div>
+          <div class="chart-empty chart-empty-sm" x-show="!accounts"><p>Loading chart…</p></div>
+          <p class="fld-hint warn" x-show="accountOverdrawn.length" x-cloak
+             x-text="'Below zero, not shown: ' + accountOverdrawn.map(a => a.name + ' ' + taka(a.balance)).join(', ')"></p>
+        </div>
+      </section>
+
+      {# ── profit / loss trend (line) ── #}
+      <section class="panel span-2">
+        <div class="panel-head">
+          <h3>Profit &amp; loss trend <span class="muted-inline" x-text="'· last ' + profitDays + ' days'"></span></h3>
+          <div class="seg seg-sm" role="tablist" aria-label="Profit trend range">
+            <button type="button" role="tab" :aria-selected="(profitDays === 7).toString()" :class="{ 'is-on': profitDays === 7 }" @click="setProfitDays(7)">7 days</button>
+            <button type="button" role="tab" :aria-selected="(profitDays === 30).toString()" :class="{ 'is-on': profitDays === 30 }" @click="setProfitDays(30)">30 days</button>
+          </div>
+        </div>
+        <p class="panel-note" x-show="charts && plHasData && !chartsError" x-cloak>
+          Net <b :class="plTotals.sum < 0 ? 'txt-due' : 'txt-ok'" x-text="taka(plTotals.sum)"></b>
+          <span class="muted-inline" x-text="'· ' + plTotals.profitDays + ' profit ' + (plTotals.profitDays === 1 ? 'day' : 'days') + ', ' + plTotals.lossDays + ' loss ' + (plTotals.lossDays === 1 ? 'day' : 'days')"></span>
+        </p>
+        <div class="chart-wrap">
+          <div class="chart-box" x-show="charts && plHasData && !chartsError" x-cloak :class="{ 'is-busy': chartsLoading }">
+            <canvas id="chart-pl" role="img" :aria-label="plSummary"></canvas>
+          </div>
+          <div class="chart-empty" x-show="charts && !plHasData && !chartsError" x-cloak>
+            {% icon "income" 22 %}<p>No profit or loss recorded in the last <span x-text="profitDays"></span> days.</p>
+          </div>
+          <div class="chart-empty" x-show="!charts && !chartsError"><p>Loading chart…</p></div>
+        </div>
+      </section>
+
+      {# ── expiry alerts (batch tracking) ── #}
+      <section class="panel" x-show="perms.reports">
+        <div class="panel-head">
+          <h3>Expiry alerts</h3>
+          <a class="muted-inline" href="{% url 'web:expiry' %}">View all</a>
+        </div>
+        <div class="alerts" x-show="expiry" x-cloak>
+          <div class="alert-box" :class="{ 'is-hot': expiry && expiry.counts.expired > 0 }">
+            <span class="alert-n" x-text="expiry ? expiry.counts.expired : '—'"></span>
+            <span>Already expired</span>
+          </div>
+          <div class="alert-box" :class="{ 'is-warm': expiry && expiry.counts.expiring > 0 }">
+            <span class="alert-n" x-text="expiry ? expiry.counts.expiring : '—'"></span>
+            <span x-text="'Expire in ' + (expiry ? expiry.days : 30) + ' days'"></span>
+          </div>
+        </div>
+        <ul class="rows compact" x-show="expiryHas" x-cloak>
+          <template x-for="b in ((expiry && expiry.batches) || [])" :key="b.id">
+            <li>
+              <div class="row-main"><b x-text="b.product_name"></b><span x-text="(b.batch_no ? 'Batch ' + b.batch_no + ' · ' : '') + qty(b.qty_remaining) + ' left'"></span></div>
+              <div class="row-amt">
+                <span class="stock-pill" :class="b.days_left < 0 ? 'is-out' : 'is-low'" x-text="expiryLabel(b)"></span>
+              </div>
+            </li>
+          </template>
+        </ul>
+        <template x-if="expiry && !expiryHas">
+          <p class="panel-note ok">{% icon "check-circle" 16 %} Nothing is expiring soon.</p>
+        </template>
+        <template x-if="!expiry">
+          <p class="panel-note">Loading…</p>
+        </template>
+      </section>
+
+      {# ── stock value by category (bar) ── #}
+      <section class="panel span-2" x-show="perms.reports">
+        <div class="panel-head">
+          <h3>Stock value <span class="muted-inline">· by category, at cost</span></h3>
+          <span x-show="charts && stockHasData" x-cloak x-text="taka(stock.total_cost)"></span>
+        </div>
+        <div class="alerts" x-show="charts && stockHasData" x-cloak style="grid-template-columns:repeat(3,1fr)">
+          <div class="alert-box"><span class="alert-n" x-text="taka(stock.total_cost)"></span><span>What it cost you</span></div>
+          <div class="alert-box"><span class="alert-n" x-text="taka(stock.total_retail)"></span><span>At selling price</span></div>
+          <div class="alert-box"><span class="alert-n" :class="stock.expected_margin < 0 ? 'txt-due' : 'txt-ok'" x-text="taka(stock.expected_margin)"></span><span>Expected margin</span></div>
+        </div>
+        <div class="chart-wrap">
+          <div class="chart-box" x-show="charts && stockHasData && !chartsError" x-cloak :class="{ 'is-busy': chartsLoading }">
+            <canvas id="chart-stock" role="img" :aria-label="stockSummary"></canvas>
+          </div>
+          <div class="chart-empty" x-show="charts && !stockHasData && !chartsError" x-cloak>
+            {% icon "box" 22 %}<p>No products in stock yet.</p>
+          </div>
+          <div class="chart-empty" x-show="!charts && !chartsError"><p>Loading chart…</p></div>
+        </div>
+      </section>
+
       {# ── money flow ── #}
       <section class="panel span-2">
         <div class="panel-head">

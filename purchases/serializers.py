@@ -1,6 +1,7 @@
 import logging
 import traceback
 from rest_framework import serializers
+from django.utils import timezone
 from .models import Purchase, PurchaseItem
 from products.models import Product
 from accounts.models import Account
@@ -22,7 +23,7 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PurchaseItem
-        fields = ['id', 'product_id', 'product', 'product_name', 'qty', 'price', 'discount', 'discount_type', 'product_total']
+        fields = ['id', 'product_id', 'product', 'product_name', 'qty', 'price', 'discount', 'discount_type', 'product_total', 'batch_no', 'expiry_date']
         read_only_fields = ['id', 'product', 'product_name', 'product_total']
 
     def validate_price(self, value):
@@ -34,6 +35,14 @@ class PurchaseItemSerializer(serializers.ModelSerializer):
         if value <= 0:
             raise serializers.ValidationError("Quantity must be greater than 0")
         return value
+
+    def validate_expiry_date(self, value):
+        if value and value < timezone.localdate():
+            raise serializers.ValidationError("Expiry date cannot be in the past")
+        return value
+
+    def validate_batch_no(self, value):
+        return (value or '').strip() or None
 
 
 class PurchaseSerializer(serializers.ModelSerializer):

@@ -1,0 +1,182 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/stock_adjust.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  <a class="btn btn-ghost top-act" href="{% url 'web:stocktakes' %}">{% icon "check-circle" 18 %}<span>Stocktake</span></a>
+{% endblock %}
+{% block content %}
+<div x-data="stockAdjust({ canEdit: {{ can_edit|yesno:'true,false' }} })">
+
+  {% if can_edit %}
+  <form class="mr-grid po-grid" @submit.prevent="save()" novalidate @keydown.enter="if ($event.target.tagName === 'INPUT') $event.preventDefault()">
+    <div class="po-main">
+      <section class="panel mr-form">
+        {# 1 — product #}
+        <div class="fgroup">
+          <div class="fgroup-head"><span class="step">1</span><h3>Product</h3></div>
+          <div class="psearch" @click.outside="showResults = false" :class="{ 'has-error': errors.product }" x-show="!product">
+            <div class="psearch-box">
+              {% icon "search" 18 %}
+              <input x-ref="pq" type="text" x-model="pq" autocomplete="off" placeholder="Search product by name, or scan / type the SKU and press Enter"
+                     @focus="showResults = !!results.length" @keydown.arrow-down.prevent="move(1)" @keydown.arrow-up.prevent="move(-1)"
+                     @keydown.enter.prevent="searchEnter()" @keydown.escape="showResults = false" aria-label="Search products">
+              <span class="psearch-spin" x-show="searching" x-cloak></span>
+            </div>
+            <ul class="psearch-pop" x-ref="results" x-show="showResults && pq.trim()" x-cloak role="listbox">
+              <template x-for="(p, i) in results" :key="p.id">
+                <li role="option" :class="{ 'is-hi': i === hi }" @mouseenter="hi = i" @click="pick(p)">
+                  <div><b x-text="p.name"></b><span x-text="[p.sku, p.category].filter(Boolean).join(' · ')"></span></div>
+                  <small x-text="'In stock ' + num(p.stock)"></small>
+                </li>
+              </template>
+              <li class="combo-none" x-show="!searching && !results.length">No product matches “<span x-text="pq"></span>”</li>
+            </ul>
+          </div>
+          <p class="fld-err" x-show="errors.product" x-text="errors.product"></p>
+
+          <div class="adj-pick" x-show="product" x-cloak>
+            <div>
+              <b x-text="product && product.name"></b>
+              <span x-text="product && [product.sku, product.category].filter(Boolean).join(' · ')"></span>
+            </div>
+            <div class="adj-now"><span>In stock now</span><b x-text="product ? num(product.stock) : ''"></b></div>
+            <button type="button" class="btn btn-ghost btn-sm" @click="clearProduct()">Change</button>
+          </div>
+        </div>
+
+        {# 2 — how much #}
+        <div class="fgroup" x-show="product" x-cloak>
+          <div class="fgroup-head"><span class="step">2</span><h3>New stock</h3></div>
+          <div class="seg" role="radiogroup" aria-label="How to enter">
+            <button type="button" role="radio" :aria-checked="(mode === 'set').toString()" :class="{ 'is-on': mode === 'set' }" @click="setMode('set')">Set new quantity</button>
+            <button type="button" role="radio" :aria-checked="(mode === 'change').toString()" :class="{ 'is-on': mode === 'change' }" @click="setMode('change')">Add / remove</button>
+          </div>
+          <div class="fld" :class="{ 'has-error': errors.qty }" style="margin-top:12px">
+            <label class="fld-label" for="adj-qty" x-text="mode === 'set' ? 'Quantity you counted' : 'How many to add (+) or remove (−)'"></label>
+            <input id="adj-qty" x-ref="qty" class="in num adj-qty" type="text" inputmode="numeric" x-model="qty" autocomplete="off"
+                   :placeholder="mode === 'set' ? 'e.g. 24' : 'e.g. -3 or 5'"
+                   @input="errors.qty = ''; qty = qty.replace(mode === 'set' ? /[^0-9]/g : /[^0-9+-]/g, '')">
+            <p class="fld-err" x-show="errors.qty" x-text="errors.qty"></p>
+          </div>
+          <div class="quick" x-show="mode === 'change'" x-cloak>
+            <template x-for="d in [-10, -5, -1, 1, 5, 10]" :key="d">
+              <button type="button" class="chip" @click="bump(d)" x-text="(d > 0 ? '+' : '') + d"></button>
+            </template>
+          </div>
+        </div>
+
+        {# 3 — why #}
+        <div class="fgroup" x-show="product" x-cloak>
+          <div class="fgroup-head"><span class="step">3</span><h3>Why?</h3></div>
+          <div class="chips" role="radiogroup" aria-label="Reason" :class="{ 'has-error': errors.reason }">
+            <template x-for="r in reasonList" :key="r.key">
+              <button type="button" class="chip" role="radio" :aria-checked="(reason === r.key).toString()"
+                      :class="{ 'is-on': reason === r.key }" @click="reason = r.key; errors.reason = ''" x-text="r.label"></button>
+            </template>
+          </div>
+          <p class="fld-err" x-show="errors.reason" x-text="errors.reason"></p>
+          <div class="fld" style="margin-top:12px">
+            <label class="fld-label" for="adj-note">Note <small>(optional)</small></label>
+            <input id="adj-note" class="in" type="text" maxlength="300" x-model="note" placeholder="e.g. Crate dropped while unloading">
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <aside class="panel mr-side">
+      <h3>Result</h3>
+      <template x-if="!product"><p class="muted">Pick a product to begin.</p></template>
+      <template x-if="product">
+        <dl class="po-sum">
+          <div><dt>Before</dt><dd x-text="num(product.stock)"></dd></div>
+          <div><dt>After</dt><dd><b x-text="after === null ? '—' : num(after)"></b></dd></div>
+          <div class="po-grand"><dt>Change</dt><dd :class="diff < 0 ? 'txt-due' : (diff > 0 ? 'txt-ok' : '')" x-text="diff === null ? '—' : (diff > 0 ? '+' : '') + num(diff)"></dd></div>
+          <div x-show="diff"><dt x-text="diff < 0 ? 'Value lost (at cost)' : 'Value gained (at cost)'"></dt><dd x-text="taka(Math.abs(diff || 0) * product.cost)"></dd></div>
+        </dl>
+      </template>
+      <p class="form-err" x-show="serverError" x-cloak role="alert">{% icon "alert" 16 %}<span x-text="serverError"></span></p>
+      <button type="submit" class="btn btn-primary btn-block" :disabled="saving || !product">
+        <span x-text="saving ? 'Saving…' : 'Save adjustment'"></span>
+      </button>
+      <p class="po-foot">The change is recorded below with your name and the reason.</p>
+    </aside>
+  </form>
+  {% else %}
+  <section class="panel"><p class="muted" style="margin:0;padding:16px 20px">You can see the adjustment history, but you need the Products <b>edit</b> permission to change stock.</p></section>
+  {% endif %}
+
+  {# ───────────── history ───────────── #}
+  <section class="panel filters no-print" style="margin-top:16px">
+    <div class="f-row">
+      <label class="f-search">
+        {% icon "search" 18 %}
+        <input type="search" x-model="f.q" placeholder="Search product, SKU, number or note" aria-label="Search adjustments">
+      </label>
+      <div class="chips" role="radiogroup" aria-label="Reason filter">
+        <button type="button" class="chip" :class="{ 'is-on': !f.reason }" @click="f.reason = ''">All reasons</button>
+        <template x-for="r in filterReasons" :key="r.key">
+          <button type="button" class="chip" :class="{ 'is-on': f.reason === r.key }" @click="f.reason = r.key" x-text="r.label"></button>
+        </template>
+      </div>
+    </div>
+  </section>
+
+  <div class="sumbar sb-3" aria-live="polite">
+    <div><span>Adjustments</span><b x-text="hist ? hist.count : '—'"></b></div>
+    <div><span>Stock lost (at cost)</span><b :class="{ 'txt-due': hist && hist.totals.loss_value > 0 }" x-text="hist ? taka(hist.totals.loss_value) : '—'"></b></div>
+    <div><span>Stock gained (at cost)</span><b x-text="hist ? taka(hist.totals.gain_value) : '—'"></b></div>
+  </div>
+
+  <section class="panel">
+    <template x-if="error">
+      <div class="empty">
+        <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2>Couldn't load the history</h2><p x-text="error"></p>
+        <button class="btn btn-ghost" @click="fetch()">Try again</button>
+      </div>
+    </template>
+    <template x-if="!error">
+      <div>
+        <table class="dt" :class="{ 'is-loading': loading }">
+          <thead>
+            <tr><th>When</th><th>Product</th><th class="num">Before → After</th><th class="num">Change</th><th class="hide-md">Reason</th><th class="num hide-md">Value</th><th class="hide-md">By</th></tr>
+          </thead>
+          <tbody>
+            <template x-for="a in rows" :key="a.id">
+              <tr>
+                <td data-k="When"><span x-text="dateTime(a.created_at)"></span><span class="sub" x-text="a.number"></span></td>
+                <td data-k="Product"><b x-text="a.product_name"></b><span class="sub" x-text="a.note || a.sku"></span></td>
+                <td class="num" data-k="Before → After" x-text="a.qty_before + ' → ' + a.qty_after"></td>
+                <td class="num" data-k="Change"><b :class="a.change < 0 ? 'txt-due' : 'txt-ok'" x-text="(a.change > 0 ? '+' : '') + a.change"></b></td>
+                <td class="hide-md" data-k="Reason">
+                  <span class="pill" x-text="a.reason_label"></span>
+                  <a class="sub" x-show="a.stocktake_id" :href="'/app/stocktake/' + a.stocktake_id + '/'" x-text="a.stocktake_number"></a>
+                </td>
+                <td class="num hide-md" data-k="Value" x-text="taka(a.value_change)"></td>
+                <td class="hide-md" data-k="By" x-text="a.created_by || '—'"></td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !rows.length ? 5 : 0)" :key="'sk' + i">
+              <tr class="sk-row"><td colspan="7"><span class="sk-line"></span></td></tr>
+            </template>
+          </tbody>
+        </table>
+        <template x-if="!loading && !rows.length">
+          <div class="empty">
+            <div class="tile">{% icon "box" 26 %}</div>
+            <h2>No adjustments yet</h2>
+            <p>When you correct a product's stock by hand, or apply a stocktake, it is listed here.</p>
+          </div>
+        </template>
+        <div class="pager" x-show="hist && hist.total_pages > 1" x-cloak>
+          <button type="button" class="btn btn-ghost btn-sm" :disabled="page <= 1" @click="go(page - 1)">Previous</button>
+          <span x-text="'Page ' + page + ' of ' + (hist ? hist.total_pages : 1)"></span>
+          <button type="button" class="btn btn-ghost btn-sm" :disabled="hist && page >= hist.total_pages" @click="go(page + 1)">Next</button>
+        </div>
+      </div>
+    </template>
+  </section>
+
+  <div class="toast" x-show="toast" x-cloak x-text="toast" role="status"></div>
+</div>
+{% endblock %}

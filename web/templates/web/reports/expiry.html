@@ -1,0 +1,123 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/expiry.js' %}"></script>{% endblock %}
+{% block content %}
+<div x-data="expiryPage({ canWriteOff: {{ can_write_off|yesno:'true,false' }} })">
+
+  <section class="panel filters no-print">
+    <p class="muted" style="margin:0 0 10px">Stock that has expired or will expire soon, batch by batch. Items sell <b>earliest expiry first</b>. Expired stock is sold last, so write it off here instead of selling it.</p>
+    <div class="f-row">
+      <label class="f-search">
+        {% icon "search" 18 %}
+        <input type="search" x-model="f.q" placeholder="Search product, batch or supplier" aria-label="Search batches">
+      </label>
+      <div class="ex-days">
+        <span>Soon means within</span>
+        <input class="in num" type="number" min="1" max="365" x-model.number="days" @change="setDays(days)" aria-label="Days">
+        <span>days</span>
+      </div>
+    </div>
+    <div class="f-row">
+      <div class="chips" role="radiogroup" aria-label="Show">
+        <template x-for="o in views" :key="o.key">
+          <button type="button" class="chip" role="radio" :aria-checked="(f.view === o.key).toString()"
+                  :class="{ 'is-on': f.view === o.key }" @click="setView(o.key)" x-text="o.label + (data ? ' (' + o.count + ')' : '')"></button>
+        </template>
+      </div>
+      <div class="f-combos">
+        <button type="button" class="btn btn-ghost" @click="window.print()">{% icon "printer" 16 %} Print</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="sumbar sb-3" aria-live="polite">
+    <div><span>Already expired</span><b :class="{ 'txt-due': data && data.counts.expired > 0 }" x-text="data ? data.counts.expired + (data.counts.expired === 1 ? ' batch' : ' batches') : '—'"></b>
+      <small class="sum-note" x-show="data && data.value.expired > 0" x-text="data && (taka(data.value.expired) + ' at cost')"></small></div>
+    <div><span x-text="'Expiring in ' + days + ' days'"></span><b x-text="data ? data.counts.expiring + (data.counts.expiring === 1 ? ' batch' : ' batches') : '—'"></b>
+      <small class="sum-note" x-show="data && data.value.expiring > 0" x-text="data && (taka(data.value.expiring) + ' at cost')"></small></div>
+    <div><span>Cost at risk</span><b :class="{ 'txt-due': atRisk > 0 }" x-text="data ? taka(atRisk) : '—'"></b></div>
+  </div>
+
+  <section class="panel">
+    <template x-if="error">
+      <div class="empty">
+        <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2>Couldn't load expiry alerts</h2><p x-text="error"></p>
+        <button class="btn btn-ghost" @click="fetch()">Try again</button>
+      </div>
+    </template>
+    <template x-if="!error">
+      <div>
+        <table class="dt" :class="{ 'is-loading': loading }">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Batch</th>
+              <th>Expiry</th>
+              <th class="num">Left</th>
+              <th class="num hide-md">At cost</th>
+              <th class="hide-md">Bought from</th>
+              <th class="no-print" x-show="canWriteOff"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="b in shown" :key="b.id">
+              <tr>
+                <td data-k="Product"><b x-text="b.product_name"></b><span class="sub" x-text="[b.sku, b.category].filter(Boolean).join(' · ')"></span></td>
+                <td data-k="Batch" x-text="b.batch_no || '—'"></td>
+                <td data-k="Expiry">
+                  <span class="ex-pill" :class="'is-' + b.status" x-text="label(b)"></span>
+                  <span class="sub" x-text="fmtDate(b.expiry_date)"></span>
+                </td>
+                <td class="num" data-k="Left" x-text="qty(b.qty_remaining)"></td>
+                <td class="num hide-md" data-k="At cost" x-text="taka(b.cost_value)"></td>
+                <td class="hide-md" data-k="Bought from"><span x-text="b.supplier || '—'"></span><span class="sub" x-text="b.purchase_invoice"></span></td>
+                <td class="no-print" data-k="Action" x-show="canWriteOff">
+                  <button type="button" class="btn btn-ghost btn-sm" x-show="b.status === 'expired'" @click="ask(b)">Write off</button>
+                </td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !data ? 6 : 0)" :key="'sk' + i">
+              <tr class="sk-row"><td colspan="7"><span class="sk-line"></span></td></tr>
+            </template>
+          </tbody>
+        </table>
+        <template x-if="!loading && data && !shown.length">
+          <div class="empty">
+            <div class="tile">{% icon "check-circle" 26 %}</div>
+            <h2 x-text="data.counts.total ? 'No batches match' : 'No expiry dates tracked yet'"></h2>
+            <p x-text="data.counts.total ? 'Try another search or switch the view.' : 'When you buy a product, type its expiry date (and batch number) on the purchase. It will appear here and sell earliest-expiry first.'"></p>
+          </div>
+        </template>
+      </div>
+    </template>
+  </section>
+
+  {# ───────────── write-off confirm ───────────── #}
+  <div class="modal-wrap" x-show="wo" x-cloak x-transition.opacity.duration.120ms @click.self="wo = null"
+       role="dialog" aria-modal="true" aria-labelledby="wo-title" @keydown.escape.window="wo = null">
+    <div class="modal">
+      <div class="modal-icon">{% icon "trash" 22 %}</div>
+      <h2 id="wo-title">Write off <span x-text="wo && wo.product_name"></span>?</h2>
+      <p class="ex-modal-note">
+        <b x-text="wo && qty(wo.qty_remaining)"></b> from batch <b x-text="wo && (wo.batch_no || '—')"></b>
+        (<span x-text="wo && label(wo)"></span>) comes out of stock and is recorded in <b>Bad Stock</b>.
+        Money is not refunded by this step.
+      </p>
+      <label class="fld">
+        <span class="fld-label">Reason <small>(optional)</small></span>
+        <input class="in" type="text" maxlength="200" x-model="reason" placeholder="Expired">
+      </label>
+      <p class="modal-err" x-show="woError" x-text="woError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="wo = null" :disabled="busy">Keep it</button>
+        <button type="button" class="btn btn-danger" @click="writeOff()" :disabled="busy">
+          <span x-text="busy ? 'Writing off…' : 'Write off'"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" x-show="toast" x-cloak x-text="toast" role="status"></div>
+</div>
+{% endblock %}

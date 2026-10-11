@@ -392,6 +392,7 @@
             // কেনার দাম — product এর purchase price; না থাকলে খালি (বিক্রির দাম বসালে লাভ ভুল দেখাত)
             qty: '1', price: p.cost > 0 ? String(p.cost) : '', lastCost: p.cost,
             discount: '', discount_type: 'fixed', err: '',
+            batch_no: '', expiry: '', expErr: false,
           };
           this.rows.push(row);
           this.focusRow(row.key);
@@ -409,6 +410,15 @@
       remove(row) { this.rows = this.rows.filter(r => r.key !== row.key); },
       lineOf(row) { return lineTotal(row.qty, row.price, row.discount, row.discount_type); },
       backToSearch() { this.$refs.pq && this.$refs.pq.focus(); },
+
+      // ───── ব্যাচ / মেয়াদ ─────
+      get minExpiry() { return iso(today()); },
+      expiryQuick: [
+        { label: '1 month', date: () => { const d = today(); d.setMonth(d.getMonth() + 1); return iso(d); } },
+        { label: '3 months', date: () => { const d = today(); d.setMonth(d.getMonth() + 3); return iso(d); } },
+        { label: '6 months', date: () => { const d = today(); d.setMonth(d.getMonth() + 6); return iso(d); } },
+        { label: '1 year', date: () => { const d = today(); d.setFullYear(d.getFullYear() + 1); return iso(d); } },
+      ],
 
       // ───── totals ─────
       get t() {
@@ -452,6 +462,7 @@
           if (!(q > 0) || !Number.isInteger(q)) r.err = 'Quantity must be a whole number above 0.';
           else if (!(n(r.price) > 0)) r.err = 'Enter the unit cost.';
           else if (r.discount_type === 'percentage' && n(r.discount) > 100) r.err = 'Discount cannot be more than 100%.';
+          else if (r.expiry && r.expiry < iso(today())) { r.err = 'The expiry date has already passed.'; r.expErr = true; }
           else r.err = '';
           if (r.err) e.items = e.items || 'Fix the highlighted rows.';
         });
@@ -470,10 +481,15 @@
           supplier: Number(this.form.supplier),
           purchase_date: this.form.date,
           remark: this.form.remark.trim(),
-          purchase_items: this.rows.map(r => ({
-            product_id: r.product_id, qty: n(r.qty), price: r2(r.price).toFixed(2),
-            discount: r2(r.discount).toFixed(2), discount_type: r.discount_type,
-          })),
+          purchase_items: this.rows.map(r => {
+            const it = {
+              product_id: r.product_id, qty: n(r.qty), price: r2(r.price).toFixed(2),
+              discount: r2(r.discount).toFixed(2), discount_type: r.discount_type,
+            };
+            if (r.batch_no.trim()) it.batch_no = r.batch_no.trim();
+            if (r.expiry) it.expiry_date = r.expiry;
+            return it;
+          }),
           overall_discount: r2(this.form.discount).toFixed(2), overall_discount_type: this.form.discount_type,
           vat: r2(this.form.vat).toFixed(2), vat_type: this.form.vat_type,
           overall_service_charge: r2(this.form.service).toFixed(2), overall_service_charge_type: this.form.service_type,

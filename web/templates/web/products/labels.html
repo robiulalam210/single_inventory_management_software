@@ -1,0 +1,81 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}
+<script src="{% static 'web/vendor/jsbarcode-code128-3.11.6.min.js' %}"></script>
+<script src="{% static 'web/js/labels.js' %}"></script>
+{% endblock %}
+{% block topbar_actions %}
+  <a class="btn btn-ghost top-act" href="{% url 'web:products' %}">{% icon "box" 18 %}<span>Products</span></a>
+{% endblock %}
+{% block content %}
+<div x-data="labelPrint()">
+  <div class="mr-grid po-grid no-print">
+    <div class="po-main">
+      <section class="panel mr-form">
+        <div class="fgroup">
+          <div class="fgroup-head"><span class="step">1</span><h3>Products</h3></div>
+          <div class="psearch" @click.outside="showResults = false">
+            <div class="psearch-box">
+              {% icon "search" 18 %}
+              <input id="lp-q" type="text" x-model="pq" autocomplete="off" placeholder="Search product by name, or scan / type the SKU and press Enter"
+                     @focus="showResults = !!results.length" @keydown.arrow-down.prevent="move(1)" @keydown.arrow-up.prevent="move(-1)"
+                     @keydown.enter.prevent="searchEnter()" @keydown.escape="showResults = false" aria-label="Search products">
+              <span class="psearch-spin" x-show="searching" x-cloak></span>
+            </div>
+            <ul class="psearch-pop" x-ref="results" x-show="showResults && pq.trim()" x-cloak role="listbox">
+              <template x-for="(p, i) in results" :key="p.id">
+                <li role="option" :class="{ 'is-hi': i === hi }" @mouseenter="hi = i" @click="add(p)">
+                  <div><b x-text="p.name"></b><span x-text="p.sku"></span></div>
+                  <small x-text="'In stock ' + p.stock"></small>
+                </li>
+              </template>
+              <li class="combo-none" x-show="!searching && !results.length">No product matches “<span x-text="pq"></span>”</li>
+            </ul>
+          </div>
+
+          <div class="lp-empty" x-show="!rows.length" x-cloak>Search above and add the products you want labels for.</div>
+          <ul class="lp-list" x-show="rows.length" x-cloak>
+            <template x-for="(r, i) in rows" :key="r.id">
+              <li>
+                <div class="lp-name"><b x-text="r.name"></b><span x-text="r.sku"></span></div>
+                <input class="in lp-n" type="number" min="1" max="500" x-model.number="r.count" @blur="fix(r)" :aria-label="'Labels for ' + r.name">
+                <button type="button" class="btn btn-ghost" @click="remove(i)" :aria-label="'Remove ' + r.name">{% icon "trash" 18 %}</button>
+              </li>
+            </template>
+          </ul>
+        </div>
+      </section>
+    </div>
+
+    <aside class="po-side">
+      <section class="panel mr-form">
+        <div class="fgroup">
+          <div class="fgroup-head"><span class="step">2</span><h3>Layout</h3></div>
+          <label class="fld-label" for="lp-cols">Labels per row</label>
+          <select id="lp-cols" class="in" x-model.number="cols">
+            <template x-for="c in [2,3,4,5,6]" :key="c"><option :value="c" x-text="c"></option></template>
+          </select>
+          <label class="check"><input type="checkbox" x-model="showName"> Show product name</label>
+          <label class="check"><input type="checkbox" x-model="showPrice"> Show price</label>
+        </div>
+        <p class="lp-total"><b x-text="total"></b> labels · <span x-text="rows.length"></span> products</p>
+        <button type="button" class="btn btn-primary" :disabled="!total" @click="print()">{% icon "printer" 18 %} Print</button>
+        <button type="button" class="btn btn-ghost" :disabled="!rows.length" @click="rows = []">Clear all</button>
+      </section>
+    </aside>
+  </div>
+
+  <section class="panel lp-preview-wrap" x-show="total" x-cloak>
+    <h3 class="no-print">Preview</h3>
+    <div class="ls-sheet print-area" :style="`--cols:${cols}`">
+      <template x-for="(l, i) in labels" :key="i">
+        <div class="lbl">
+          <b x-show="showName" x-text="l.name"></b>
+          <svg class="lbl-bc" :data-code="l.sku"></svg>
+          <span x-show="showPrice" x-text="l.price"></span>
+        </div>
+      </template>
+    </div>
+  </section>
+</div>
+{% endblock %}

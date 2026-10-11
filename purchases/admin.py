@@ -193,3 +193,13 @@ class PurchaseItemAdmin(admin.ModelAdmin):
             return f"${obj.subtotal():,.2f}"
         return 'N/A'
     subtotal_display.short_description = 'Subtotal'
+
+
+from .models import ProductBatch  # noqa: E402
+
+
+@admin.register(ProductBatch)
+class ProductBatchAdmin(admin.ModelAdmin):
+    list_display = ("product", "batch_no", "expiry_date", "qty_received", "qty_remaining", "is_active")
+    list_filter = ("is_active", "expiry_date")
+    search_fields = ("product__name", "batch_no")

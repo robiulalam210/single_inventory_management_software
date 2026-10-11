@@ -465,6 +465,9 @@ class Purchase(models.Model):
                 product = Product.objects.select_for_update().get(pk=item.product_id)
                 product.stock_qty -= item.qty
                 product.save(update_fields=['stock_qty', 'updated_at'])
+            # এই কেনার ব্যাচগুলোও আর গুদামে নেই
+            ProductBatch.objects.filter(purchase_item__purchase=self).update(
+                qty_remaining=Decimal('0'), is_active=False)
 
             # যতটুকু টাকা দেওয়া হয়েছিল, account এ ফেরত — Transaction নিজেই balance বাড়ায়
             if self.paid_amount > 0 and self.account_id:
@@ -703,7 +706,13 @@ class PurchaseItem(models.Model):
         if self.discount < 0:
             raise ValidationError("Discount cannot be negative")
         if self.expiry_date and str(self.expiry_date) < str(timezone.localdate()):
-            raise ValidationError("Expiry date cannot be in the past")
+            # পুরনো item এর মেয়াদ পরে পেরিয়ে গেলে তার অন্য কিছু (যেমন qty) বদলানো আটকানো উচিত নয়
+            unchanged = False
+            if self.pk:
+                prev = PurchaseItem.objects.filter(pk=self.pk).values_list('expiry_date', flat=True).first()
+                unchanged = prev == self.expiry_date
+            if not unchanged:
+                raise ValidationError("Expiry date cannot be in the past")
 
     def subtotal(self):
         """Calculate item subtotal with proper rounding"""
@@ -752,6 +761,9 @@ class PurchaseItem(models.Model):
                     product.stock_qty += stock_change
                 
                 product.save()
+
+                # ব্যাচ / মেয়াদ ট্র্যাকিং — batch_no বা expiry_date দেওয়া থাকলে ProductBatch তৈরি/হালনাগাদ
+                ProductBatch.sync_from_item(self, None if is_new else old_qty)
                 
                 if not hasattr(self.purchase, '_updating_totals'):
                     self.purchase.update_totals()
@@ -791,3 +803,65 @@ class PurchaseItem(models.Model):
             'batch_no': self.batch_no,
             'expiry_date': self.expiry_date.isoformat() if self.expiry_date else None,
         }
+
+
+class ProductBatch(models.Model):
+    """
+    একটা কেনার লাইনে যে ব্যাচ (লট) ঘরে এসেছে, আর তার মেয়াদ।
+
+    • PurchaseItem এ batch_no / expiry_date দিলেই এটা নিজে নিজে তৈরি হয় (PurchaseItem.save)।
+    • বিক্রির সময় আগে-মেয়াদ-শেষ-হবে-সেটা-আগে (FEFO) নিয়মে qty_remaining কমে (purchases/batches.py)।
+    • Product.stock_qty ই আসল মোট স্টক; ব্যাচ শুধু বলে সেই স্টকের কতটা কোন তারিখে নষ্ট হবে।
+    """
+    product = models.ForeignKey('products.Product', on_delete=models.CASCADE, related_name='batches')
+    purchase_item = models.OneToOneField(
+        PurchaseItem, on_delete=models.CASCADE, null=True, blank=True, related_name='batch')
+    batch_no = models.CharField(max_length=50, blank=True, default='')
+    expiry_date = models.DateField(null=True, blank=True)
+    qty_received = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal('0'))
+    qty_remaining = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal('0'))
+    unit_cost = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['expiry_date', 'id']
+        indexes = [
+            models.Index(fields=['product', 'is_active']),
+            models.Index(fields=['expiry_date']),
+        ]
+
+    def __str__(self):
+        return f"{self.product.name} · {self.batch_no or 'batch'} ({self.qty_remaining} left)"
+
+    @classmethod
+    def sync_from_item(cls, item, old_qty=None):
+        """PurchaseItem save হওয়ার পরে ডাকা হয়। old_qty=None মানে নতুন item।"""
+        batch_no = (item.batch_no or '').strip()
+        has_info = bool(batch_no or item.expiry_date)
+        batch = cls.objects.filter(purchase_item=item).first()
+
+        if not has_info:
+            if batch:
+                batch.delete()  # ব্যাচের তথ্য মুছে দেওয়া হয়েছে
+            return None
+
+        qty = Decimal(str(item.qty))
+        label = batch_no or (item.purchase.invoice_no if item.purchase_id else '')
+        if batch is None:
+            return cls.objects.create(
+                product_id=item.product_id, purchase_item=item, batch_no=label,
+                expiry_date=item.expiry_date, qty_received=qty, qty_remaining=qty,
+                unit_cost=item.price or Decimal('0.00'))
+
+        delta = qty - Decimal(str(old_qty if old_qty is not None else batch.qty_received))
+        batch.product_id = item.product_id
+        batch.batch_no = label
+        batch.expiry_date = item.expiry_date
+        batch.qty_received = qty
+        batch.qty_remaining = max(Decimal('0'), batch.qty_remaining + delta)
+        batch.unit_cost = item.price or Decimal('0.00')
+        batch.is_active = True
+        batch.save()
+        return batch

@@ -1,0 +1,87 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/stocktake.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  <a class="btn btn-ghost top-act" href="{% url 'web:stock_adjust' %}">{% icon "pencil" 18 %}<span>Stock Adjustment</span></a>
+{% endblock %}
+{% block content %}
+<div x-data="stocktakeList({ canEdit: {{ can_edit|yesno:'true,false' }} })">
+
+  {% if can_edit %}
+  <section class="panel mr-form">
+    <div class="fgroup">
+      <div class="fgroup-head"><h3>Start a new count</h3></div>
+      <p class="muted" style="margin:-6px 0 12px">The stock you have right now is saved as the starting point. Count what is on the shelves, then apply the differences.</p>
+      <div class="fld-row">
+        <div class="fld">
+          <label class="fld-label" for="st-title">Name <small>(optional)</small></label>
+          <input id="st-title" class="in" type="text" maxlength="150" x-model="form.title" placeholder="e.g. Month-end count">
+        </div>
+        <div class="fld">
+          <label class="fld-label" for="st-cat">What to count</label>
+          <select id="st-cat" class="in" x-model="form.category">
+            <option value="">Every active product</option>
+            <template x-for="c in categories" :key="c.id"><option :value="c.id" x-text="'Only ' + c.name"></option></template>
+          </select>
+        </div>
+      </div>
+      <div class="fld">
+        <label class="fld-label" for="st-note">Note <small>(optional)</small></label>
+        <input id="st-note" class="in" type="text" maxlength="300" x-model="form.note" placeholder="e.g. Counted after closing, rack 1–4">
+      </div>
+      <p class="form-err" x-show="startError" x-cloak role="alert">{% icon "alert" 16 %}<span x-text="startError"></span></p>
+      <button type="button" class="btn btn-primary" @click="start()" :disabled="starting">
+        {% icon "check-circle" 18 %} <span x-text="starting ? 'Starting…' : 'Start counting'"></span>
+      </button>
+    </div>
+  </section>
+  {% endif %}
+
+  <section class="panel" style="margin-top:16px">
+    <div class="panel-head"><h3>Counts</h3>
+      <div class="chips" role="radiogroup" aria-label="Status">
+        <template x-for="o in statuses" :key="o.key">
+          <button type="button" class="chip" :class="{ 'is-on': status === o.key }" @click="status = o.key; fetch()" x-text="o.label"></button>
+        </template>
+      </div>
+    </div>
+    <template x-if="error">
+      <div class="empty">
+        <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2>Couldn't load the counts</h2><p x-text="error"></p>
+        <button class="btn btn-ghost" @click="fetch()">Try again</button>
+      </div>
+    </template>
+    <template x-if="!error">
+      <div>
+        <table class="dt" :class="{ 'is-loading': loading }">
+          <thead><tr><th>Count</th><th>Status</th><th class="num">Progress</th><th class="num hide-md">Differences</th><th class="num hide-md">Net value</th><th class="hide-md">Started</th><th class="no-print"></th></tr></thead>
+          <tbody>
+            <template x-for="c in rows" :key="c.id">
+              <tr>
+                <td data-k="Count"><b x-text="c.title"></b><span class="sub" x-text="c.number + ' · ' + (c.category_name || 'All products')"></span></td>
+                <td data-k="Status"><span class="pill" :class="'st-' + (c.status === 'applied' ? 'paid' : (c.status === 'cancelled' ? 'cancelled' : 'partial'))" x-text="c.status_label"></span></td>
+                <td class="num" data-k="Progress" x-text="c.summary.counted + ' of ' + c.summary.total"></td>
+                <td class="num hide-md" data-k="Differences" x-text="c.summary.differing"></td>
+                <td class="num hide-md" data-k="Net value"><b :class="c.summary.net_value < 0 ? 'txt-due' : (c.summary.net_value > 0 ? 'txt-ok' : '')" x-text="taka(c.summary.net_value)"></b></td>
+                <td class="hide-md" data-k="Started"><span x-text="dateTime(c.created_at)"></span><span class="sub" x-text="c.created_by"></span></td>
+                <td class="no-print"><a class="btn btn-ghost btn-sm" :href="'/app/stocktake/' + c.id + '/'" x-text="c.status === 'draft' ? 'Open' : 'View'"></a></td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !rows.length ? 4 : 0)" :key="'sk' + i">
+              <tr class="sk-row"><td colspan="7"><span class="sk-line"></span></td></tr>
+            </template>
+          </tbody>
+        </table>
+        <template x-if="!loading && !rows.length">
+          <div class="empty">
+            <div class="tile">{% icon "check-circle" 26 %}</div>
+            <h2>No counts yet</h2>
+            <p>Start a count above, then walk the shelves and type in what you find.</p>
+          </div>
+        </template>
+      </div>
+    </template>
+  </section>
+</div>
+{% endblock %}
