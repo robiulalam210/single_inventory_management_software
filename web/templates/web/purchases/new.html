@@ -110,6 +110,17 @@
                 </div>
                 <div class="po-amt"><span class="po-k">Amount</span><b x-text="taka(lineOf(r))"></b></div>
                 <button type="button" class="icon-btn po-x" @click="remove(r)" :aria-label="'Remove ' + r.name">{% icon "x" 16 %}</button>
+                <div class="po-batch">
+                  <label class="po-cell"><span class="po-k">Batch no <small>(optional)</small></span>
+                    <input class="in" type="text" maxlength="50" placeholder="e.g. L2410" x-model="r.batch_no" :aria-label="'Batch number of ' + r.name"></label>
+                  <label class="po-cell" :class="{ 'has-error': r.expErr }"><span class="po-k">Expiry date <small>(optional)</small></span>
+                    <input class="in" type="date" x-model="r.expiry" :min="minExpiry" @input="r.expErr = false; r.err = ''" :aria-label="'Expiry date of ' + r.name"></label>
+                  <div class="po-quick">
+                    <template x-for="q in expiryQuick" :key="q.label">
+                      <button type="button" class="chip" @click="r.expiry = q.date(); r.expErr = false; r.err = ''" x-text="'+ ' + q.label"></button>
+                    </template>
+                  </div>
+                </div>
                 <p class="po-err" x-show="r.err" x-text="r.err"></p>
               </div>
             </template>
@@ -211,7 +222,7 @@
       <button type="submit" class="btn btn-primary btn-block" :disabled="saving">
         <span x-text="saving ? 'Saving…' : 'Save purchase'"></span>
       </button>
-      <p class="po-foot">Stock goes up as soon as you save.</p>
+      <p class="po-foot">Stock goes up as soon as you save. Items with an expiry date show up in <b>Expiry Alerts</b>.</p>
     </aside>
   </form>
 </div>

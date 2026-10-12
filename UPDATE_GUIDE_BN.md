@@ -180,3 +180,77 @@ python tools/tests/test_sync.py    # offline sync, duplicate, stock conflict, au
 - যারা Dashboard / Products / Purchases / Reports এর কোনোটা দেখতে পায় না, তাদের কিছু দেখায় না।
 - API (Flutter app ও ব্যবহার করতে পারে): `GET /api/reports/low-stock-alert/` → `data.report[]` (সবচেয়ে কম stock আগে, সর্বোচ্চ ৫০টা) + `data.summary` (`total_low_stock_items`, `critical_items`, `running_low`)।
 - পরীক্ষা: `python manage.py test reports.test_low_stock_alert`
+
+
+---
+
+# ড্যাশবোর্ডে নতুন ৪ চার্ট + ব্যাচ/মেয়াদ ট্র্যাকিং
+
+## ড্যাশবোর্ডের নতুন চার্ট
+- **Monthly profit** — শেষ ৬/১২ মাসের মোট লাভ ও নিট লাভ (ক্ষতির মাস লাল)।
+- **Where the money sits** — account balance ভাগ (শুধু ধনাত্মক balance; ঋণাত্মক হলে নিচে আলাদা লেখা)।
+- **Profit & loss trend** — শেষ ৭/৩০ দিনের দৈনিক নিট লাভ; শূন্যের নিচে লাল = ক্ষতির দিন।
+- **Stock value** — category অনুযায়ী গুদামের মালের মূল্য (কেনা দামে), সাথে বিক্রয়মূল্য ও সম্ভাব্য margin (Reports দেখার অনুমতি লাগে)।
+- লাভের হিসাব ড্যাশবোর্ডের "Net profit" কার্ডের হুবহু একই: Σ(বিক্রির দাম − পণ্যের কেনা দাম) × পরিমাণ − খরচ।
+- API: `GET /api/reports/dashboard-charts/?months=6|12&days=7|30`
+
+## ব্যাচ / মেয়াদ ট্র্যাকিং (মুদির দোকানের জন্য)
+- **কেনার সময়** প্রতিটা পণ্যের নিচে *Batch no* ও *Expiry date* (+১ মাস/৩ মাস/৬ মাস/১ বছর বোতামসহ), দুটোই ঐচ্ছিক। তারিখ বা ব্যাচ দিলেই ব্যাচ তৈরি হয়।
+- **বিক্রির সময়** আগে-মেয়াদ-শেষ-হবে-সেটা-আগে (FEFO) নিয়মে নিজে নিজে ব্যাচ থেকে কমে। মেয়াদ-পেরোনো ব্যাচ সবার শেষে বিক্রি হয়।
+  বিক্রি মুছলে ঠিক সেই ব্যাচেই ফেরত যায়। ক্রয় বাতিল করলে তার ব্যাচ শূন্য হয়।
+- **Reports → Expiry Alerts** (`/app/expiry/`): পেরোনো / শিগগিরই-পেরোবে (ডিফল্ট ৩০ দিন, বদলানো যায়) / ঠিক আছে; ঝুঁকিতে থাকা টাকা;
+  পেরোনো ব্যাচে **Write off**: স্টক থেকে বাদ যায় আর Bad Stock এ লেখা থাকে (products edit অনুমতি লাগে)।
+- ড্যাশবোর্ডে **Expiry alerts** কার্ড।
+- API: `GET /api/reports/expiry-alerts/?days=30&status=alerts|all|expired|expiring|ok&limit=` ; `POST /api/reports/expiry-alerts/<id>/write-off/`
+- সীমা: Sales Return / Purchase Return / Bad Stock ব্যাচ ছোঁয় না। ব্যাচের যোগফল স্টকের বেশি হলে বাড়তিটা সবচেয়ে দেরির মেয়াদ থেকে ছাঁটা হয়, ফলে জরুরি সতর্কতা লুকোয় না।
+  তাই পচনশীল পণ্য কেনার সময় সবসময় মেয়াদ দিন।
+- নতুন migration: `purchases/0002_productbatch`, `sales/0002_saleitembatch` → `python manage.py migrate`
+
+## সুপার অ্যাডমিন "Staff" দেখানোর ভুল
+- `createsuperuser` এখন role = SUPER_ADMIN বসায়। আগে বানানো অ্যাকাউন্ট: `python manage.py fix_superadmin_role <username>`
+
+## পরীক্ষা
+```bash
+python manage.py test purchases    # ২৫টা: ব্যাচ, FEFO, সতর্কতা, চার্ট API, পেজ আঁকা
+```
+
+
+---
+
+# Stock Adjustment ও Stocktake (গুনে সিস্টেমের সাথে মেলানো)
+
+## Stock Adjustment — `/app/stock/adjust/` (মেনু: Products → Stock Adjustment)
+- এক পণ্যের স্টক হাতে ঠিক করুন: **Set new quantity** (গুনে পাওয়া মোট) অথবা **Add / remove** (+/−)।
+- কারণ বাছতে হয়: Damaged, Expired, Lost / stolen, Found / extra, Entry mistake, Opening stock, Other।
+- ইতিহাসে থাকে: কখন, কে, আগে→পরে, পরিবর্তন, কেনা-দামে টাকার ক্ষতি/লাভ। কারণ ও লেখা দিয়ে খোঁজা যায়।
+- স্টক ০ এর নিচে নামানো যায় না।
+
+## Stocktake — `/app/stocktake/` (মেনু: Products → Stocktake)
+1. **Start counting**: ওই মুহূর্তের স্টক snapshot হয়। পুরো দোকান বা শুধু একটা Category বাছা যায়।
+2. গণনার স্ক্রিনে বারকোড স্ক্যান করুন (বা নাম/SKU লিখে Enter) → কার্সার ওই পণ্যের ঘরে যায়। সংখ্যা লিখে Enter → পরের সারি। হুবহু মিললে **✓**।
+   সংখ্যা নিজে নিজে সেভ হয় (পেজ রিলোডেও থাকে)। **Not counted / Differences** ফিল্টারে বাকি আর অমিল দেখা যায়।
+3. **Print count sheet**: সিস্টেমের সংখ্যা ছাড়া (অন্ধ গণনা) ফাঁকা ঘরসহ খাতা ছাপানো যায়।
+4. **Apply to stock**: গণনা করা পণ্যের পার্থক্য স্টকে বসে, প্রতিটার জন্য Stock Adjustment (কারণ: Stock count) লেখা হয়।
+   - গণনা না করা পণ্য ছোঁয়া হয় না।
+   - পার্থক্য = গণনা − snapshot, আর সেটা **এখনকার** স্টকে যোগ/বিয়োগ হয়, তাই গণনার মাঝে বিক্রি হলেও হিসাব ঠিক থাকে।
+   - কোনো পণ্যে স্টক ঋণাত্মক হয়ে যাবে এমন হলে কিছুই বদলায় না; কোনটা আবার গুনতে হবে বলে দেয়।
+   - Apply এর আগে স্টক বদলায় না; **Cancel count** করলেও না।
+- অনুমতি: দেখতে Products view; গণনা/ঠিক করতে Products edit (Super Admin সবসময়)।
+- API: `/api/stock/adjustments/` (GET, POST), `/api/stock/counts/` (GET, POST), `/api/stock/counts/<id>/` (GET), `.../count/` (POST), `.../apply/` (POST), `.../cancel/` (POST)
+- নতুন অ্যাপ `stocktake`; নতুন migration: `stocktake/0001_initial` → `python manage.py migrate`
+- পরীক্ষা: `python manage.py test stocktake` (১৫টা)
+
+
+## বার্কোড লেবেল প্রিন্ট (নতুন পেজ)
+
+**কোথায়:** সাইডবারে *Products → Barcode Labels* (`/app/products/labels/`)। Products পেজের উপরেও বাটন আছে।
+
+**কীভাবে:**
+1. পণ্যের নাম বা SKU লিখে যোগ করুন (SKU লিখে Enter চাপলে সরাসরি যোগ হয়; স্ক্যানার দিয়েও চলে)।
+2. প্রতিটি পণ্যের পাশে কয়টা লেবেল লাগবে লিখুন (সর্বোচ্চ ৫০০, মোট ২০০০)।
+3. প্রতি সারিতে ২–৬টি লেবেল, নাম ও দাম দেখানো/না-দেখানো ঠিক করুন; নিচে প্রিভিউ দেখা যাবে।
+4. **Print** চাপুন। প্রিন্টে শুধু লেবেলগুলো যায়, মেনু/বাটন যায় না।
+
+**আরও:** `?ids=1,2,3` যোগ করলে সেই পণ্যগুলো আগে থেকেই তালিকায় আসে। বাছা সারি-সংখ্যা ও নাম/দাম অপশন ব্রাউজার মনে রাখে।
+
+**মাইগ্রেশন লাগবে না** — শুধু নতুন পেজ, ডাটাবেস বদলায়নি। মোবাইল/ডেস্কটপ অ্যাপে এটা নেই (সোর্স না থাকায়)।

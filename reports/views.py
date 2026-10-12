@@ -2092,3 +2092,157 @@ class DashboardTrendsView(BaseReportView):
             import traceback
             traceback.print_exc()
             return self.handle_exception(e)
+
+
+class DashboardChartsView(BaseReportView):
+    """
+    Dashboard এর নতুন ৩টি চার্টের data (একই request এ):
+      • monthly      — শেষ N মাসের বিক্রি / মোট লাভ / খরচ / নিট লাভ   (?months=6|12)
+      • profit_trend — শেষ ৭/৩০ দিনের প্রতিদিনের নিট লাভ (ক্ষতি হলে ঋণাত্মক) (?days=7|30)
+      • stock_value  — এখন গুদামে থাকা মালের মূল্য, category অনুযায়ী
+
+    লাভের হিসাব Dashboard এর KPI কার্ডের হুবহু একই:
+      মোট লাভ = Σ (বিক্রির দাম − পণ্যের কেনা দাম) × base_quantity
+      নিট লাভ = মোট লাভ − খরচ
+    DB তে TruncMonth/TruncDate ব্যবহার করা হয়নি (MySQL এ timezone table না থাকলে NULL দেয়) —
+    Python এ ভাগ করা হয়েছে।
+    """
+
+    @staticmethod
+    def _month_key(d):
+        return (d.year, d.month)
+
+    def get(self, request):
+        try:
+            try:
+                months = int(request.GET.get('months', 6))
+            except (TypeError, ValueError):
+                months = 6
+            if months not in (6, 12):
+                months = 6
+            try:
+                days = int(request.GET.get('days', 30))
+            except (TypeError, ValueError):
+                days = 30
+            if days not in (7, 30):
+                days = 30
+
+            today = timezone.localdate()
+
+            # ───── মাসের তালিকা (পুরনো → নতুন) ─────
+            month_list = []
+            y, m = today.year, today.month
+            for _ in range(months):
+                month_list.append((y, m))
+                m -= 1
+                if m == 0:
+                    y, m = y - 1, 12
+            month_list.reverse()
+            m_index = {k: i for i, k in enumerate(month_list)}
+            first_month_start = datetime(month_list[0][0], month_list[0][1], 1).date()
+
+            m_sales = [0.0] * months
+            m_gross = [0.0] * months
+            m_exp = [0.0] * months
+
+            day_list = [today - timedelta(days=days - 1 - i) for i in range(days)]
+            d_index = {d: i for i, d in enumerate(day_list)}
+            d_gross = [0.0] * days
+            d_exp = [0.0] * days
+
+            # ───── বিক্রি + মোট লাভ (sale item থেকে) ─────
+            start_dt = timezone.make_aware(datetime.combine(first_month_start, datetime.min.time()))
+            end_dt = timezone.make_aware(datetime.combine(today, datetime.max.time()))
+
+            for sale_date, grand in Sale.objects.filter(
+                sale_date__gte=start_dt, sale_date__lte=end_dt
+            ).values_list('sale_date', 'grand_total').iterator(chunk_size=2000):
+                i = m_index.get(self._month_key(timezone.localtime(sale_date)))
+                if i is not None:
+                    m_sales[i] += float(grand or 0)
+
+            for sale_date, unit_price, base_qty, cost in SaleItem.objects.filter(
+                sale__sale_date__gte=start_dt, sale__sale_date__lte=end_dt
+            ).values_list(
+                'sale__sale_date', 'unit_price', 'base_quantity', 'product__purchase_price'
+            ).iterator(chunk_size=2000):
+                local = timezone.localtime(sale_date)
+                profit = (float(unit_price or 0) - float(cost or 0)) * float(base_qty or 0)
+                i = m_index.get(self._month_key(local))
+                if i is not None:
+                    m_gross[i] += profit
+                j = d_index.get(local.date())
+                if j is not None:
+                    d_gross[j] += profit
+
+            # ───── খরচ ─────
+            for e_date, amount in Expense.objects.filter(
+                expense_date__gte=first_month_start, expense_date__lte=today
+            ).values_list('expense_date', 'amount').iterator(chunk_size=2000):
+                amount = float(amount or 0)
+                i = m_index.get(self._month_key(e_date))
+                if i is not None:
+                    m_exp[i] += amount
+                j = d_index.get(e_date)
+                if j is not None:
+                    d_exp[j] += amount
+
+            # ───── স্টক মূল্য (category অনুযায়ী) ─────
+            money = DecimalField(max_digits=18, decimal_places=2)
+            rows = Product.objects.filter(is_active=True, stock_qty__gt=0).values('category__name').annotate(
+                cost=Sum(ExpressionWrapper(F('stock_qty') * F('purchase_price'), output_field=money)),
+                retail=Sum(ExpressionWrapper(F('stock_qty') * F('selling_price'), output_field=money)),
+                qty=Sum('stock_qty'),
+                products=Count('id'),
+            )
+            cats = [{
+                'name': r['category__name'] or 'Uncategorised',
+                'cost_value': float(r['cost'] or 0),
+                'retail_value': float(r['retail'] or 0),
+                'qty': int(r['qty'] or 0),
+                'products': r['products'],
+            } for r in rows]
+            cats.sort(key=lambda c: c['cost_value'], reverse=True)
+            top = cats[:6]
+            rest = cats[6:]
+            if rest:
+                top.append({
+                    'name': 'Other',
+                    'cost_value': sum(c['cost_value'] for c in rest),
+                    'retail_value': sum(c['retail_value'] for c in rest),
+                    'qty': sum(c['qty'] for c in rest),
+                    'products': sum(c['products'] for c in rest),
+                })
+            for c in top:
+                c['cost_value'] = round(c['cost_value'], 2)
+                c['retail_value'] = round(c['retail_value'], 2)
+
+            total_cost = round(sum(c['cost_value'] for c in cats), 2)
+            total_retail = round(sum(c['retail_value'] for c in cats), 2)
+
+            return custom_response(True, "Dashboard charts fetched successfully", {
+                'monthly': {
+                    'months': months,
+                    'labels': ['%04d-%02d' % k for k in month_list],
+                    'sales': [round(v, 2) for v in m_sales],
+                    'gross_profit': [round(v, 2) for v in m_gross],
+                    'expenses': [round(v, 2) for v in m_exp],
+                    'net_profit': [round(g - e, 2) for g, e in zip(m_gross, m_exp)],
+                },
+                'profit_trend': {
+                    'days': days,
+                    'labels': [d.isoformat() for d in day_list],
+                    'net_profit': [round(g - e, 2) for g, e in zip(d_gross, d_exp)],
+                },
+                'stock_value': {
+                    'total_cost': total_cost,
+                    'total_retail': total_retail,
+                    'expected_margin': round(total_retail - total_cost, 2),
+                    'product_count': sum(c['products'] for c in cats),
+                    'by_category': top,
+                },
+            })
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return self.handle_exception(e)

@@ -35,6 +35,9 @@ MENU = [
     ]},
     {'title': 'Products', 'icon': 'box', 'items': [
         {'title': 'Products', 'url': 'web:products', 'perm': ('products', 'view'), 'slug': 'products'},
+        {'title': 'Barcode Labels', 'url': 'web:label_print', 'perm': ('products', 'view'), 'slug': 'label-print'},
+        {'title': 'Stock Adjustment', 'url': 'web:stock_adjust', 'perm': ('products', 'view'), 'slug': 'stock-adjust'},
+        {'title': 'Stocktake', 'url': 'web:stocktakes', 'perm': ('products', 'view'), 'slug': 'stocktake'},
     ]},
     {'title': 'Accounts', 'icon': 'wallet', 'items': [
         {'title': 'Accounts', 'url': 'web:accounts', 'perm': ('accounts', 'view'), 'slug': 'accounts'},
@@ -64,6 +67,7 @@ MENU = [
         {'title': 'Top Selling Products', 'url': 'web:report_top_products', 'perm': ('reports', 'view'), 'slug': 'report-top-products'},
         {'title': 'Low Stock', 'url': 'web:report_low_stock', 'perm': ('reports', 'view'), 'slug': 'report-low-stock'},
         {'title': 'Stock Report', 'url': 'web:report_stock', 'perm': ('reports', 'view'), 'slug': 'report-stock'},
+        {'title': 'Expiry Alerts', 'url': 'web:expiry', 'perm': ('reports', 'view'), 'slug': 'expiry'},
         {'title': 'Customer Ledger', 'url': 'web:report_customer_ledger', 'perm': ('reports', 'view'), 'slug': 'report-customer-ledger'},
         {'title': 'Customer Due / Advance', 'url': 'web:report_customer_due', 'perm': ('reports', 'view'), 'slug': 'report-customer-due'},
         {'title': 'Supplier Ledger', 'url': 'web:report_supplier_ledger', 'perm': ('reports', 'view'), 'slug': 'report-supplier-ledger'},

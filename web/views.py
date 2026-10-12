@@ -841,6 +841,64 @@ def due_reminders_view(request):
     return render(request, 'web/customers/due_reminders.html', {'page_title': 'Due Reminders'})
 
 
+@web_login_required
+@never_cache
+def expiry_view(request):
+    """Expiry Alerts — ব্যাচ অনুযায়ী মেয়াদ পেরোনো / শিগগিরই পেরোবে এমন মাল; পেরোনোটা স্টক থেকে বাদ (write-off) দেওয়া যায়।"""
+    if not has_perm(request.user, 'reports', 'view'):
+        return forbidden(request, 'Expiry Alerts')
+    return render(request, 'web/reports/expiry.html', {
+        'page_title': 'Expiry Alerts',
+        'can_write_off': request.user.is_superuser or has_perm(request.user, 'products', 'edit'),
+    })
+
+
+@web_login_required
+@never_cache
+def stock_adjust_view(request):
+    """Stock Adjustment — এক পণ্যের স্টক হাতে ঠিক করা (নষ্ট, হারানো, ভুল এন্ট্রি…), আর সব বদলের ইতিহাস।"""
+    if not has_perm(request.user, 'products', 'view'):
+        return forbidden(request, 'Stock Adjustment')
+    return render(request, 'web/stock/adjust.html', {
+        'page_title': 'Stock Adjustment',
+        'can_edit': request.user.is_superuser or has_perm(request.user, 'products', 'edit'),
+    })
+
+
+@web_login_required
+@never_cache
+def label_print_view(request):
+    """Barcode Labels — অনেক পণ্যের লেবেল একসাথে সাজিয়ে প্রিন্ট (প্রতিটার কয়টা করে লাগবে বেছে)।"""
+    if not has_perm(request.user, 'products', 'view'):
+        return forbidden(request, 'Barcode Labels')
+    return render(request, 'web/products/labels.html', {'page_title': 'Barcode Labels'})
+
+
+@web_login_required
+@never_cache
+def stocktakes_view(request):
+    """Stocktake — গণনার তালিকা ও নতুন গণনা শুরু।"""
+    if not has_perm(request.user, 'products', 'view'):
+        return forbidden(request, 'Stocktake')
+    return render(request, 'web/stock/stocktakes.html', {
+        'page_title': 'Stocktake',
+        'can_edit': request.user.is_superuser or has_perm(request.user, 'products', 'edit'),
+    })
+
+
+@web_login_required
+@never_cache
+def stocktake_count_view(request, pk):
+    """একটা গণনার স্ক্রিন — গুনে সংখ্যা লেখা, পার্থক্য দেখা, সিস্টেমের সাথে মিলানো (Apply)।"""
+    if not has_perm(request.user, 'products', 'view'):
+        return forbidden(request, 'Stocktake')
+    return render(request, 'web/stock/count.html', {
+        'page_title': 'Stocktake',
+        'count_id': pk,
+        'can_edit': request.user.is_superuser or has_perm(request.user, 'products', 'edit'),
+    })
+
+
 REPORT_TITLES = {
     'sales': 'Sales Report', 'purchases': 'Purchase Report', 'profit-loss': 'Profit / Loss',
     'top-products': 'Top Selling Products', 'low-stock': 'Low Stock', 'stock': 'Stock Report',

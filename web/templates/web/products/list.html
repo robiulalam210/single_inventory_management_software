@@ -5,6 +5,7 @@
 <script src="{% static 'web/js/products.js' %}"></script>
 {% endblock %}
 {% block topbar_actions %}
+  <a class="btn btn-ghost top-act" href="{% url 'web:label_print' %}">{% icon "printer" 18 %}<span>Barcode labels</span></a>
   {% if pr_perms.create %}<button type="button" class="btn btn-primary top-act" onclick="window.dispatchEvent(new CustomEvent('product-new'))">{% icon "plus" 18 %}<span>New product</span></button>{% endif %}
 {% endblock %}
 {% block content %}

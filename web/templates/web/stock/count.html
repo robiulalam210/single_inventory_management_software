@@ -1,0 +1,181 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/stocktake.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  <a class="btn btn-ghost top-act" href="{% url 'web:stocktakes' %}">{% icon "chevron-left" 18 %}<span>All counts</span></a>
+{% endblock %}
+{% block content %}
+<div x-data="stocktakeCount({ id: {{ count_id }}, canEdit: {{ can_edit|yesno:'true,false' }} })" @keydown.escape.window="confirm = ''">
+
+  <template x-if="error && !c">
+    <section class="panel empty">
+      <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+      <h2>Couldn't open this count</h2><p x-text="error"></p>
+      <button class="btn btn-ghost" @click="load()">Try again</button>
+    </section>
+  </template>
+
+  <template x-if="c">
+  <div>
+    {# ───── head ───── #}
+    <section class="panel no-print st-head">
+      <div>
+        <h2 style="margin:0" x-text="c.title"></h2>
+        <p class="muted" style="margin:4px 0 0" x-text="c.number + ' · ' + (c.category_name || 'All products') + ' · started ' + dateTime(c.created_at) + (c.created_by ? ' by ' + c.created_by : '')"></p>
+        <p class="muted" style="margin:2px 0 0" x-show="c.note" x-text="c.note"></p>
+      </div>
+      <div class="st-actions">
+        <span class="pill" :class="c.status === 'applied' ? 'st-paid' : (c.status === 'cancelled' ? 'st-cancelled' : 'st-partial')" x-text="c.status_label"></span>
+        <span class="muted st-saved" x-show="c.status === 'draft'" x-text="saveText" aria-live="polite"></span>
+        <button type="button" class="btn btn-ghost" @click="window.print()">{% icon "printer" 16 %} Print count sheet</button>
+        <template x-if="c.status === 'draft' && canEdit">
+          <span class="st-actions">
+            <button type="button" class="btn btn-ghost" @click="confirm = 'cancel'">Cancel count</button>
+            <button type="button" class="btn btn-primary" @click="askApply()" :disabled="!sum.counted">Apply to stock</button>
+          </span>
+        </template>
+      </div>
+    </section>
+
+    <div class="notice notice-ok no-print" x-show="c.status === 'applied'" x-cloak role="status">
+      {% icon "check-circle" 18 %}<span>Applied <span x-text="dateTime(c.applied_at)"></span><span x-show="c.applied_by" x-text="' by ' + c.applied_by"></span>. Stock now matches this count.
+        <a href="{% url 'web:stock_adjust' %}">See the adjustments</a>.</span>
+    </div>
+    <div class="notice notice-warn no-print" x-show="c.status === 'cancelled'" x-cloak role="status">
+      {% icon "alert" 18 %}<span>This count was cancelled. Stock was not changed.</span>
+    </div>
+
+    {# ───── progress ───── #}
+    <div class="sumbar no-print" style="grid-template-columns:repeat(4,minmax(0,1fr))" aria-live="polite">
+      <div><span>Counted</span><b x-text="sum.counted + ' of ' + sum.total"></b>
+        <div class="st-bar" aria-hidden="true"><i :style="'width:' + pct + '%'"></i></div></div>
+      <div><span>Differences</span><b x-text="sum.differing"></b></div>
+      <div><span>Short (missing)</span><b :class="{ 'txt-due': sum.short_qty > 0 }" x-text="sum.short_qty + ' pcs'"></b><small class="sum-note" x-text="taka(sum.short_value) + ' at cost'"></small></div>
+      <div><span>Over (extra)</span><b :class="{ 'txt-ok': sum.over_qty > 0 }" x-text="sum.over_qty + ' pcs'"></b><small class="sum-note" x-text="taka(sum.over_value) + ' at cost'"></small></div>
+    </div>
+
+    {# ───── controls ───── #}
+    <section class="panel filters no-print">
+      <div class="f-row">
+        <label class="f-search">
+          {% icon "search" 18 %}
+          <input x-ref="scan" type="search" x-model="q" autocomplete="off" placeholder="Scan barcode, or type name / SKU and press Enter"
+                 @keydown.enter.prevent="scanEnter()" aria-label="Scan or search">
+        </label>
+        <div class="chips" role="radiogroup" aria-label="Show">
+          <template x-for="o in views" :key="o.key">
+            <button type="button" class="chip" role="radio" :aria-checked="(view === o.key).toString()" :class="{ 'is-on': view === o.key }"
+                    @click="view = o.key; limit = 150" x-text="o.label + ' (' + o.count + ')'"></button>
+          </template>
+        </div>
+      </div>
+      <p class="fld-hint" x-show="scanMsg" x-cloak x-text="scanMsg"></p>
+    </section>
+
+    {# ───── lines ───── #}
+    <section class="panel no-print">
+      <table class="dt st-table">
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th class="num">System</th>
+            <th class="num">Counted</th>
+            <th class="num">Difference</th>
+            <th class="no-print" x-show="c.status === 'applied'">Stock changed</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="l in shown" :key="l.id">
+            <tr :data-line="l.id" :class="{ 'is-hot': hot === l.id }">
+              <td data-k="Product">
+                <b x-text="l.name"></b>
+                <span class="sub" x-text="[l.sku, l.category].filter(Boolean).join(' · ')"></span>
+                <span class="sub txt-due" x-show="l.moved" x-text="'Stock changed since you started: now ' + l.system_now + ' (was ' + l.system_qty + ')'"></span>
+              </td>
+              <td class="num" data-k="System" x-text="l.system_qty"></td>
+              <td class="num" data-k="Counted">
+                <template x-if="c.status === 'draft' && canEdit">
+                  <span class="st-cell">
+                    <input class="in num st-in" type="text" inputmode="numeric" :data-in="l.id" x-model="l.input" autocomplete="off"
+                           @input="l.input = l.input.replace(/[^0-9]/g, ''); edited(l)" @keydown.enter.prevent="next(l)" @focus="$event.target.select()"
+                           :aria-label="'Counted quantity of ' + l.name">
+                    <button type="button" class="chip st-ok" @click="match(l)" :title="'Same as system (' + l.system_qty + ')'" aria-label="Matches the system">✓</button>
+                  </span>
+                </template>
+                <template x-if="!(c.status === 'draft' && canEdit)"><span x-text="l.counted_qty === null ? '—' : l.counted_qty"></span></template>
+              </td>
+              <td class="num" data-k="Difference">
+                <span class="pill" x-show="diffOf(l) !== null" :class="diffOf(l) === 0 ? 'st-paid' : (diffOf(l) < 0 ? 'st-overdue' : 'st-partial')"
+                      x-text="diffOf(l) === 0 ? 'Matches' : (diffOf(l) > 0 ? '+' : '') + diffOf(l)"></span>
+                <span class="muted" x-show="diffOf(l) === null">—</span>
+              </td>
+              <td class="num" data-k="Stock changed" x-show="c.status === 'applied'" x-text="l.applied_change === null ? '—' : (l.applied_change > 0 ? '+' : '') + l.applied_change"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+      <div class="pager" x-show="filtered.length > shown.length" x-cloak>
+        <span class="pager-info" x-text="'Showing ' + shown.length + ' of ' + filtered.length"></span>
+        <button type="button" class="btn btn-ghost btn-sm" @click="limit += 150">Show more</button>
+      </div>
+      <template x-if="!filtered.length">
+        <div class="empty">
+          <div class="tile">{% icon "check-circle" 26 %}</div>
+          <h2 x-text="q.trim() ? 'No product matches' : (view === 'uncounted' ? 'Everything is counted' : 'Nothing to show here')"></h2>
+          <p x-text="q.trim() ? 'Try another name or SKU.' : 'Switch the filter above to see other products.'"></p>
+        </div>
+      </template>
+    </section>
+
+    {# ───── print-only count sheet (সিস্টেমের সংখ্যা ছাড়া — "অন্ধ গণনা") ───── #}
+    <section class="st-print">
+      <h2 x-text="c.title"></h2>
+      <p x-text="c.number + ' · ' + (c.category_name || 'All products') + ' · ' + dateTime(c.created_at)"></p>
+      <table>
+        <thead><tr><th>Product</th><th>SKU</th><th>Counted</th><th>Checked by</th></tr></thead>
+        <tbody>
+          <template x-for="l in c.lines" :key="'p' + l.id">
+            <tr><td x-text="l.name"></td><td x-text="l.sku"></td><td class="st-blank"></td><td class="st-blank"></td></tr>
+          </template>
+        </tbody>
+      </table>
+    </section>
+  </div>
+  </template>
+
+  {# ───── apply / cancel confirm ───── #}
+  <div class="modal-wrap" x-show="confirm" x-cloak x-transition.opacity.duration.120ms @click.self="confirm = ''" role="dialog" aria-modal="true" aria-labelledby="st-m-title">
+    <div class="modal">
+      <template x-if="confirm === 'apply'">
+        <div>
+          <div class="modal-icon" style="background:var(--blue-wash);color:var(--blue)">{% icon "check-circle" 22 %}</div>
+          <h2 id="st-m-title">Apply this count to stock?</h2>
+          <p class="ex-modal-note">
+            <b x-text="sum.differing"></b> product<span x-show="sum.differing !== 1">s</span> will change:
+            <b class="txt-due" x-text="sum.short_qty + ' pcs short (' + taka(sum.short_value) + ')'"></b> and
+            <b class="txt-ok" x-text="sum.over_qty + ' pcs extra (' + taka(sum.over_value) + ')'"></b>.
+            <span x-show="sum.uncounted">The <b x-text="sum.uncounted"></b> product<span x-show="sum.uncounted !== 1">s</span> you did not count stay exactly as they are.</span>
+            This cannot be undone, but every change is recorded in Stock Adjustment.
+          </p>
+        </div>
+      </template>
+      <template x-if="confirm === 'cancel'">
+        <div>
+          <div class="modal-icon">{% icon "trash" 22 %}</div>
+          <h2 id="st-m-title">Cancel this count?</h2>
+          <p class="ex-modal-note">The numbers you typed are discarded. Stock is not changed.</p>
+        </div>
+      </template>
+      <p class="modal-err" x-show="modalError" x-text="modalError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="confirm = ''" :disabled="busy">Go back</button>
+        <button type="button" class="btn" :class="confirm === 'cancel' ? 'btn-danger' : 'btn-primary'" @click="confirm === 'apply' ? apply() : cancel()" :disabled="busy">
+          <span x-text="busy ? 'Working…' : (confirm === 'apply' ? 'Apply to stock' : 'Cancel count')"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" x-show="toast" x-cloak x-text="toast" role="status"></div>
+</div>
+{% endblock %}

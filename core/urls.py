@@ -107,6 +107,7 @@ urlpatterns = [
     path('supplier-payments/<int:pk>/cancel/', SupplierPaymentCancelAPIView.as_view(), name='supplier-payment-cancel'),
 
     path('reports/', include('reports.urls')),
+    path('stock/', include('stocktake.urls')),  # stock adjustment + stocktake
     path('sync/', include('offline_sync.urls')),  # offline sync + audit
 
     path('payroll/', include('payroll.urls')),

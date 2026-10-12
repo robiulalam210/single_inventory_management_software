@@ -2,6 +2,7 @@
 from django.urls import path
 from . import views
 from .export_views import ReportExportView
+from .expiry_views import ExpiryAlertsView, ExpiryWriteOffView
 from .reminder_views import CustomerDueReminderView
 
 urlpatterns = [
@@ -18,6 +19,9 @@ urlpatterns = [
     path('stock/', views.StockReportView.as_view(), name='stock-report'),
     path('dashboard/', views.DashboardSummaryView.as_view(), name='dashboard-summary'),
     path('dashboard-trends/', views.DashboardTrendsView.as_view(), name='dashboard-trends'),
+    path('expiry-alerts/', ExpiryAlertsView.as_view(), name='expiry-alerts'),
+    path('expiry-alerts/<int:batch_id>/write-off/', ExpiryWriteOffView.as_view(), name='expiry-write-off'),
+    path('dashboard-charts/', views.DashboardChartsView.as_view(), name='dashboard-charts'),
 
     path('supplier-due-advance/', views.SupplierDueAdvanceReportView.as_view(), name='supplier-due-advance-report'),
     path('supplier-ledger/', views.SupplierLedgerReportView.as_view(), name='supplier-ledger-report'),
