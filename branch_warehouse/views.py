@@ -1,6 +1,6 @@
 from rest_framework import viewsets, filters
 from rest_framework.permissions import IsAuthenticated
-from .model import Branch, Warehouse
+from .models import Branch, Warehouse
 from .serializers import (
     BranchSerializer, WarehouseSerializer
    

@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     'purchases',
     'products',
     'stocktake',
+    'dayclose',
     'sales',
     'returns',
     'branch_warehouse',

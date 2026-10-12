@@ -19,7 +19,7 @@ class SaleItemInline(admin.TabularInline):
     fields = [
         'product', 
         'sale_mode', 
-        'sale_quantity', 
+        'quantity', 
         'base_quantity',
         'unit_price',
         'price_type',
@@ -195,7 +195,7 @@ class SaleItemAdmin(admin.ModelAdmin):
         'sale_link',
         'product_link',
         'sale_mode_display',
-        'sale_quantity',
+        'quantity',
         'base_quantity',
         'unit_price',
         'discount_display',
@@ -231,7 +231,7 @@ class SaleItemAdmin(admin.ModelAdmin):
             'fields': ('product', 'stock_info')
         }),
         ('Sale Mode & Quantity', {
-            'fields': ('sale_mode', 'sale_quantity', 'base_quantity')
+            'fields': ('sale_mode', 'quantity', 'base_quantity')
         }),
         ('Pricing', {
             'fields': ('price_type', 'unit_price', 'flat_price', 'price_info')

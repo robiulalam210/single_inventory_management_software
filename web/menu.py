@@ -73,6 +73,7 @@ MENU = [
         {'title': 'Supplier Ledger', 'url': 'web:report_supplier_ledger', 'perm': ('reports', 'view'), 'slug': 'report-supplier-ledger'},
         {'title': 'Supplier Due / Advance', 'url': 'web:report_supplier_due', 'perm': ('reports', 'view'), 'slug': 'report-supplier-due'},
         {'title': 'Expense Report', 'url': 'web:report_expenses', 'perm': ('reports', 'view'), 'slug': 'report-expenses'},
+        {'title': 'Day Close', 'url': 'web:day_close', 'perm': ('reports', 'view'), 'slug': 'day-close'},
     ]},
     {'title': 'Administration', 'icon': 'settings', 'items': [
         {'title': 'Staff', 'url': 'web:staff', 'perm': ('users', 'view'), 'slug': 'staff'},

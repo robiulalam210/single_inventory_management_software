@@ -51,6 +51,7 @@ urlpatterns = [
     path('expiry/', views.expiry_view, name='expiry'),
     path('products/labels/', views.label_print_view, name='label_print'),
     path('stock/adjust/', views.stock_adjust_view, name='stock_adjust'),
+    path('reports/day-close/', views.day_close_view, name='day_close'),
     path('stocktake/', views.stocktakes_view, name='stocktakes'),
     path('stocktake/<int:pk>/', views.stocktake_count_view, name='stocktake_count'),
     path('reports/sales/', views.report_view, {'key': 'sales'}, name='report_sales'),

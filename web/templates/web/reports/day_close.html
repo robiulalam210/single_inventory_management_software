@@ -1,0 +1,124 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/dayclose.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  <button type="button" class="btn btn-ghost top-act" onclick="window.print()">{% icon "printer" 18 %}<span>Print</span></button>
+{% endblock %}
+{% block content %}
+<div x-data="dayClose()">
+
+  <section class="panel filters no-print">
+    <div class="f-row">
+      <label class="fld" style="margin:0">
+        <span class="fld-label">Date</span>
+        <input class="in" type="date" x-model="date" @change="load()" :max="new Date().toISOString().slice(0,10)">
+      </label>
+      <span class="pill" x-show="closed" x-cloak :class="'st-paid'">Closed</span>
+      <span class="pill" x-show="data && !closed" x-cloak :class="'st-partial'">Open</span>
+    </div>
+  </section>
+
+  <template x-if="error">
+    <section class="panel"><div class="empty">
+      <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+      <h2>Couldn't load this day</h2><p x-text="error"></p>
+      <button class="btn btn-ghost" @click="load()">Try again</button>
+    </div></section>
+  </template>
+
+  <template x-if="data && !error">
+    <div>
+      <div class="kpis" style="margin-top:16px">
+        <div class="kpi"><header>Sales</header><div class="kpi-val" x-text="taka(data.sales.total)"></div><span class="muted" x-text="data.sales.count + ' sales · due ' + taka(data.sales.due)"></span></div>
+        <div class="kpi"><header>Returns</header><div class="kpi-val" x-text="taka(data.returns.total)"></div><span class="muted" x-text="data.returns.count + ' returns · net sales ' + taka(data.net_sales)"></span></div>
+        <div class="kpi"><header>Purchases</header><div class="kpi-val" x-text="taka(data.purchases.total)"></div><span class="muted" x-text="data.purchases.count + ' purchases · due ' + taka(data.purchases.due)"></span></div>
+        <div class="kpi"><header>Expenses</header><div class="kpi-val" x-text="taka(data.expenses.total)"></div><span class="muted" x-text="data.expenses.count + ' entries'"></span></div>
+        <div class="kpi"><header>Other income</header><div class="kpi-val" x-text="taka(data.income.total)"></div><span class="muted" x-text="data.income.count + ' entries'"></span></div>
+        <div class="kpi"><header>Money received</header><div class="kpi-val" x-text="taka(data.receipts.total)"></div><span class="muted" x-text="data.receipts.count + ' money receipts'"></span></div>
+      </div>
+
+      <section class="panel" style="margin-top:16px">
+        <div class="panel-head"><h3>Accounts &amp; cash count</h3>
+          <button type="button" class="btn btn-ghost btn-sm no-print" x-show="!closed && canClose" @click="fillExpected()">Fill with expected</button>
+        </div>
+        <table class="dt">
+          <thead><tr><th>Account</th><th class="num">Opening</th><th class="num">In</th><th class="num">Out</th><th class="num">Expected</th><th class="num">Counted</th><th class="num">Difference</th></tr></thead>
+          <tbody>
+            <template x-for="a in lines()" :key="a.account_id">
+              <tr>
+                <td data-k="Account"><b x-text="a.name"></b><span class="sub" x-text="a.type"></span></td>
+                <td class="num" data-k="Opening" x-text="taka(a.opening)"></td>
+                <td class="num txt-ok" data-k="In" x-text="taka(a.money_in)"></td>
+                <td class="num txt-due" data-k="Out" x-text="taka(a.money_out)"></td>
+                <td class="num" data-k="Expected"><b x-text="taka(a.expected)"></b></td>
+                <td class="num" data-k="Counted">
+                  <template x-if="closed"><span x-text="taka(a.counted)"></span></template>
+                  <template x-if="!closed && canClose"><input class="in num" type="number" step="0.01" style="max-width:130px" x-model="counts[a.account_id]" :aria-label="'Counted amount for ' + a.name"></template>
+                  <template x-if="!closed && !canClose"><span class="muted">—</span></template>
+                </td>
+                <td class="num" data-k="Difference">
+                  <template x-if="diff(a) !== null"><b :class="diff(a) < 0 ? 'txt-due' : (diff(a) > 0 ? 'txt-ok' : '')" x-text="signed(diff(a))"></b></template>
+                  <template x-if="diff(a) === null"><span class="muted">—</span></template>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+          <tfoot><tr>
+            <td colspan="4"><b>Total</b></td>
+            <td class="num"><b x-text="taka(closed ? closed.total_expected : data.total_expected)"></b></td>
+            <td class="num"><b x-text="closed ? taka(closed.total_counted) : ''"></b></td>
+            <td class="num"><b :class="totalDiff < 0 ? 'txt-due' : (totalDiff > 0 ? 'txt-ok' : '')" x-text="(closed || anyCounted) ? signed(totalDiff) : ''"></b></td>
+          </tr></tfoot>
+        </table>
+        <p class="muted" style="margin:10px 0 0">“Expected” comes from the account ledger up to the end of this day. Leave Counted empty for accounts you did not count.</p>
+      </section>
+
+      <section class="panel mr-form no-print" style="margin-top:16px" x-show="!closed && canClose" x-cloak>
+        <div class="fgroup">
+          <div class="fgroup-head"><h3>Close this day</h3></div>
+          <div class="fld">
+            <label class="fld-label" for="dc-note">Note <small>(optional)</small></label>
+            <input id="dc-note" class="in" type="text" maxlength="300" x-model="note" placeholder="e.g. 10 taka short, change given late">
+          </div>
+          <p class="form-err" x-show="formError" x-cloak role="alert">{% icon "alert" 16 %}<span x-text="formError"></span></p>
+          <button type="button" class="btn btn-primary" @click="close()" :disabled="busy">{% icon "check-circle" 18 %} <span x-text="busy ? 'Closing…' : 'Close day'"></span></button>
+        </div>
+      </section>
+
+      <section class="panel" style="margin-top:16px" x-show="closed" x-cloak>
+        <p style="margin:0"><b>Closed</b> by <span x-text="closed && closed.closed_by"></span>
+          <span class="muted" x-text="closed ? ' · ' + new Date(closed.closed_at).toLocaleString('en-GB') : ''"></span></p>
+        <p class="muted" style="margin:6px 0 0" x-show="closed && closed.note" x-text="closed && closed.note"></p>
+        <p class="form-err" x-show="formError" x-cloak role="alert"><span x-text="formError"></span></p>
+        <div class="no-print" style="margin-top:12px" x-show="canReopen">
+          <button type="button" class="btn btn-ghost" x-show="!confirmReopen" @click="confirmReopen = true">Reopen this day</button>
+          <span x-show="confirmReopen" x-cloak>Reopen and discard this closing record?
+            <button type="button" class="btn btn-danger btn-sm" @click="reopen()" :disabled="busy">Yes, reopen</button>
+            <button type="button" class="btn btn-ghost btn-sm" @click="confirmReopen = false">Cancel</button></span>
+        </div>
+      </section>
+
+      <section class="panel no-print" style="margin-top:16px" x-show="history.length" x-cloak>
+        <div class="panel-head"><h3>Recent closings</h3></div>
+        <table class="dt">
+          <thead><tr><th>Date</th><th class="num">Expected</th><th class="num">Counted</th><th class="num">Difference</th><th class="hide-md">Closed by</th><th></th></tr></thead>
+          <tbody>
+            <template x-for="h in history" :key="h.id">
+              <tr>
+                <td data-k="Date"><b x-text="h.date"></b></td>
+                <td class="num" data-k="Expected" x-text="taka(h.total_expected)"></td>
+                <td class="num" data-k="Counted" x-text="taka(h.total_counted)"></td>
+                <td class="num" data-k="Difference"><b :class="h.difference < 0 ? 'txt-due' : (h.difference > 0 ? 'txt-ok' : '')" x-text="signed(h.difference)"></b></td>
+                <td class="hide-md" data-k="Closed by" x-text="h.closed_by"></td>
+                <td><button type="button" class="btn btn-ghost btn-sm" @click="pick(h.date)">View</button></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </section>
+    </div>
+  </template>
+
+  <template x-if="loading && !data && !error"><section class="panel"><span class="sk-line"></span></section></template>
+</div>
+{% endblock %}

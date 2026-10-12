@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .model import Branch, Warehouse
+from .models import Branch, Warehouse
 
 # Branch & Warehouse
 class BranchSerializer(serializers.ModelSerializer):

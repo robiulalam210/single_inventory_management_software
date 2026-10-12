@@ -876,6 +876,15 @@ def label_print_view(request):
 
 @web_login_required
 @never_cache
+def day_close_view(request):
+    """Day Close — দিনের সারাংশ দেখে ড্রয়ারের টাকা গুনে মিলানো ও দিন বন্ধ করা।"""
+    if not has_perm(request.user, 'reports', 'view'):
+        return forbidden(request, 'Day Close')
+    return render(request, 'web/reports/day_close.html', {'page_title': 'Day Close'})
+
+
+@web_login_required
+@never_cache
 def stocktakes_view(request):
     """Stocktake — গণনার তালিকা ও নতুন গণনা শুরু।"""
     if not has_perm(request.user, 'products', 'view'):
