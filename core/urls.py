@@ -107,6 +107,7 @@ urlpatterns = [
     path('supplier-payments/<int:pk>/cancel/', SupplierPaymentCancelAPIView.as_view(), name='supplier-payment-cancel'),
 
     path('reports/', include('reports.urls')),
+    path('day-close/', include('dayclose.urls')),  # দিন শেষে হিসাব বন্ধ
     path('stock/', include('stocktake.urls')),  # stock adjustment + stocktake
     path('sync/', include('offline_sync.urls')),  # offline sync + audit
 
@@ -126,7 +127,7 @@ urlpatterns = [
     path('api/products/low-stock/', ProductViewSet.as_view({'get': 'low_stock'}), name='product-low-stock'),
     path('api/products/advanced-search/', ProductViewSet.as_view({'get': 'advanced_search'}), name='product-advanced-search'),
     path('api/products/filters/', ProductViewSet.as_view({'get': 'filters'}), name='product-filters'),
-    
+    path('shop/', include('shop.api_urls')),
 
     # Admin UI
     path('admin/signup/', admin_signup, name='admin_signup'),

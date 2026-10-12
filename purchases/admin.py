@@ -1,5 +1,6 @@
 # branch_warehouse/admin.py
 from django.contrib import admin
+from django.urls import reverse
 from .models import Purchase, PurchaseItem
 from django.contrib.auth import get_user_model
 from django.utils.html import format_html
@@ -172,8 +173,8 @@ class PurchaseItemAdmin(admin.ModelAdmin):
         return super().get_queryset(request).select_related('purchase', 'product')
 
     def purchase_link(self, obj):
-        url = f"/admin/branch_warehouse/purchase/{obj.purchase.id}/change/"
-        return format_html(f'<a href="{url}">{obj.purchase.invoice_no}</a>')
+        url = reverse('admin:purchases_purchase_change', args=[obj.purchase.id])
+        return format_html('<a href="{}">{}</a>', url, obj.purchase.invoice_no)
     purchase_link.short_description = 'Purchase'
     purchase_link.admin_order_field = 'purchase__invoice_no'
     

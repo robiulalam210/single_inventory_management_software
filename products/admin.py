@@ -224,12 +224,14 @@ class ProductAdmin(admin.ModelAdmin):
     
     def get_readonly_fields(self, request, obj=None):
         """Dynamically set readonly fields"""
-        readonly_fields = ['stock_qty', 'created_at', 'updated_at', 'final_price_display', 'stock_status_display']
+        # get_sale_modes_link is listed in fieldsets, so it must ALWAYS be read-only
+        # (it is a method, not a model field). The method itself handles unsaved objects.
+        readonly_fields = [
+            'stock_qty', 'created_at', 'updated_at',
+            'final_price_display', 'stock_status_display', 'get_sale_modes_link',
+        ]
         if obj and obj.pk:  # Editing an existing object
             readonly_fields.append('sku')
-            readonly_fields.append('get_sale_modes_link')
-        else:  # New object
-            readonly_fields = ['stock_qty', 'created_at', 'updated_at', 'final_price_display', 'stock_status_display']
         return readonly_fields
     
     def final_price_display(self, obj):

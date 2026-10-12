@@ -254,3 +254,9 @@ python manage.py test purchases    # ২৫টা: ব্যাচ, FEFO, সত
 **আরও:** `?ids=1,2,3` যোগ করলে সেই পণ্যগুলো আগে থেকেই তালিকায় আসে। বাছা সারি-সংখ্যা ও নাম/দাম অপশন ব্রাউজার মনে রাখে।
 
 **মাইগ্রেশন লাগবে না** — শুধু নতুন পেজ, ডাটাবেস বদলায়নি। মোবাইল/ডেস্কটপ অ্যাপে এটা নেই (সোর্স না থাকায়)।
+
+## Day Close (দিন শেষে হিসাব বন্ধ)
+- নতুন app `dayclose`: মডেল `DayClose`, API `/api/day-close/summary/?date=`, `POST /api/day-close/`, `DELETE /api/day-close/<id>/` (Admin reopen)।
+- ওয়েব: Reports → **Day Close** (`/app/reports/day-close/`)। বিক্রি/ফেরত/ক্রয়/খরচ/আয়/আদায়ের সারাংশ, account ভিত্তিক expected বনাম counted।
+- আপডেটের পর: `python manage.py migrate` (dayclose 0001)। এটা শুধু রেকর্ড — লেনদেন তালা দেয় না।
+- অনুমতি: দেখতে reports.view, বন্ধ করতে accounts.edit, reopen শুধু Super Admin/Admin।
