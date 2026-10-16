@@ -732,7 +732,7 @@ textarea.in { height: auto; padding: 10px 12px; resize: vertical; line-height: 1
 .psearch-pop li small { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
 .psearch-pop li.is-hi { background: var(--canvas); }
 
-.po-items { margin-top: 10px; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+.po-items { margin-top: 10px; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; container-type: inline-size; container-name: po; }
 .po-row { display: grid; grid-template-columns: minmax(0, 1fr) 150px 84px 118px 128px 116px 36px; gap: 10px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
 .po-row:first-child { border-top: 0; }
 .po-row-head { background: var(--soft); font-size: 12px; font-weight: 600; color: var(--muted); padding-top: 9px; padding-bottom: 9px; }
@@ -787,21 +787,27 @@ textarea.in { height: auto; padding: 10px 12px; resize: vertical; line-height: 1
 .po-sum .po-due.is-zero dt, .po-sum .po-due.is-zero dd { color: var(--green-ink); }
 .po-foot { margin: 10px 0 0; text-align: center; font-size: 12.5px; color: var(--muted); }
 
-@media (max-width: 1280px) {
+/* সারির লেআউট স্ক্রিনের নয়, ফর্মের নিজের প্রস্থ ধরে বদলায় (সাইডবার + Invoice total জায়গা খায়) */
+@container po (max-width: 900px) {
   .po-row { grid-template-columns: minmax(0, 1fr) 132px 72px 104px 116px 104px 32px; gap: 8px; }
-  .po-charges { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-@media (max-width: 720px) {
-  .po-head { grid-template-columns: 1fr; }
+@container po (max-width: 780px) {
   .po-row-head { display: none; }
   .po-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 10px; padding: 12px; }
   .po-prod { grid-column: 1 / 3; grid-row: 1; }
+  .po-prod b { white-space: normal; overflow-wrap: anywhere; }
   .po-mode { grid-column: 1 / -1; }
   .po-row .po-x { grid-column: 3; grid-row: 1; justify-self: end; align-self: start; }
   .po-k { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 3px; }
   .po-cell .in.num { text-align: left; }
   .po-amt { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: baseline; padding-top: 6px; border-top: 1px dashed var(--line); }
   .po-amt .po-k { margin: 0; }
+}
+@media (max-width: 1280px) {
+  .po-charges { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .po-head { grid-template-columns: 1fr; }
   .po-charges { grid-template-columns: 1fr 1fr; gap: 0 10px; }
 }
 
