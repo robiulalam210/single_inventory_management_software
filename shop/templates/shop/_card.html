@@ -1,8 +1,9 @@
 <div class="img" @click="view = p"><template x-if="p.image"><img :src="p.image" :alt="p.name" loading="lazy"></template><template x-if="!p.image"><span class="ph" x-text="p.name.slice(0,1).toUpperCase()"></span></template>
-  <span class="tag" x-show="p.off" x-text="'-' + p.off + '%'"></span><span class="tag new" x-show="!p.off && p.isNew">New</span>
-  <span class="low" x-show="p.stock <= 5" x-text="'Only ' + p.stock + ' left'"></span></div>
+  <span class="tag" x-show="mode(p).off" x-text="'-' + mode(p).off + '%'"></span><span class="tag new" x-show="!mode(p).off && p.isNew">New</span>
+  <span class="low" x-show="left(p) <= 5" x-text="'Only ' + left(p) + ' left'"></span></div>
 <div class="b"><span class="meta" x-text="p.catName" x-show="p.catName"></span>
   <h3 @click="view = p" x-text="p.name"></h3>
-  <div class="pr"><b x-text="money(p.price)"></b><s x-show="p.old" x-text="money(p.old)"></s></div>
-  <template x-if="!qtyOf(p.id)"><button class="add" @click="add(p, $event)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h2l2.4 11.2a1 1 0 0 0 1 .8h8.3a1 1 0 0 0 1-.8L19 8H6"/><circle cx="9" cy="20" r="1.3"/><circle cx="17" cy="20" r="1.3"/></svg>Add to cart</button></template>
-  <template x-if="qtyOf(p.id)"><div class="qty"><button @click="dec(p)" aria-label="Less">&minus;</button><b x-text="qtyOf(p.id)"></b><button @click="add(p, $event)" aria-label="More">+</button></div></template></div>
+  <div class="pr"><b x-text="money(mode(p).price)"></b><s x-show="mode(p).old" x-text="money(mode(p).old)"></s><span class="muted" style="font-size:12px" x-show="mode(p).custom" x-text="'per ' + mode(p).step + ' ' + mode(p).name"></span></div>
+  <div class="modes" x-show="p.modes.length > 1"><template x-for="m in p.modes" :key="m.id"><button type="button" class="chip" :class="{ on: m.id === p.sel }" @click.stop="p.sel = m.id" x-text="m.name"></button></template></div>
+  <template x-if="!qtyOf(p)"><button class="add" @click="add(p, $event)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h2l2.4 11.2a1 1 0 0 0 1 .8h8.3a1 1 0 0 0 1-.8L19 8H6"/><circle cx="9" cy="20" r="1.3"/><circle cx="17" cy="20" r="1.3"/></svg>Add to cart</button></template>
+  <template x-if="qtyOf(p)"><div class="qty"><button @click="dec(p)" aria-label="Less">&minus;</button><b x-text="qtyLabel(p)"></b><button @click="add(p, $event)" aria-label="More">+</button></div></template></div>

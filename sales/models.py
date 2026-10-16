@@ -498,6 +498,14 @@ class SaleItem(models.Model):
             except Exception as e:
                 logger.exception(f"Error updating product stock for {self.product.name}: {e}")
         
+        # ব্যাচ / মেয়াদ: আগে-মেয়াদ-শেষ-হবে-সেটা-আগে (FEFO) নিয়মে ব্যাচ থেকে কমাই
+        if is_new:
+            try:
+                from purchases.batches import allocate_for_sale_item
+                allocate_for_sale_item(self)
+            except Exception:
+                logger.exception("Batch allocation failed for sale item %s", self.pk)
+
         # Recalculate sale totals
         try:
             self.sale.calculate_totals()
@@ -508,7 +516,8 @@ class SaleItem(models.Model):
         """Calculate subtotal with multi-mode pricing"""
         try:
             if self.price_type == 'flat' and self.flat_price:
-                total = self.flat_price
+                # flat_price = প্রতি প্যাক/ইউনিটের দাম, তাই পরিমাণ দিয়ে গুণ করতে হবে
+                total = Decimal(str(self.flat_price)) * Decimal(str(self.quantity or 1))
             else:
                 total = Decimal(str(self.base_quantity)) * Decimal(str(self.unit_price))
             
@@ -548,6 +557,12 @@ class SaleItem(models.Model):
     
     def delete(self, *args, **kwargs):
         """Override delete to return stock"""
+        # ব্যাচের স্টকও যেখান থেকে কমেছিল সেখানে ফেরত
+        try:
+            from purchases.batches import restore_for_sale_item
+            restore_for_sale_item(self)
+        except Exception:
+            logger.exception("Batch restore failed for sale item %s", self.pk)
         # Return stock to product
         try:
             self.product.stock_qty += float(self.base_quantity)
@@ -564,3 +579,14 @@ class SaleItem(models.Model):
             sale.calculate_totals()
         except Exception:
             pass
+
+
+class SaleItemBatch(models.Model):
+    """একটা SaleItem এর কতটা কোন ব্যাচ থেকে গেল — item মুছলে ঠিক সেখানেই ফেরত দিতে।"""
+    sale_item = models.ForeignKey(SaleItem, on_delete=models.CASCADE, related_name='batch_allocations')
+    batch = models.ForeignKey('purchases.ProductBatch', on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name='sale_allocations')
+    qty = models.DecimalField(max_digits=12, decimal_places=3)
+
+    def __str__(self):
+        return f"{self.sale_item_id} ← {self.batch_id}: {self.qty}"

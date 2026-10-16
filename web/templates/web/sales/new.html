@@ -78,8 +78,8 @@
             <ul class="psearch-pop" x-ref="results" x-show="showResults && pq.trim()" x-cloak role="listbox">
               <template x-for="(p, i) in results" :key="p.id">
                 <li role="option" :class="{ 'is-hi': i === hi, 'is-off': p.stock <= 0 }" @mouseenter="hi = i" @click="pick(p)">
-                  <div><b x-text="p.name"></b><span x-text="[p.sku, p.stock > 0 ? 'In stock ' + num(p.stock) + (p.unit ? ' ' + p.unit : '') : 'Out of stock'].filter(Boolean).join(' · ')"></span></div>
-                  <small x-text="taka(p.price)"></small>
+                  <div><b x-text="p.name"></b><span x-text="[p.sku, p.stock > 0 ? 'In stock ' + num(p.stock / p.def.factor) + ' ' + p.def.name : 'Out of stock'].filter(Boolean).join(' · ')"></span></div>
+                  <small x-text="taka(p.def.price) + (p.modes.length > 1 ? ' / ' + p.def.name : '')"></small>
                 </li>
               </template>
               <li class="combo-none" x-show="!searching && !results.length">No product matches “<span x-text="pq"></span>”</li>
@@ -95,9 +95,13 @@
               <div class="po-row" :data-row="r.key" :class="{ 'row-err': r.err }">
                 <div class="po-prod">
                   <b x-text="r.name"></b>
-                  <span x-text="[r.sku, 'In stock ' + num(r.stock)].filter(Boolean).join(' · ')"></span>
+                  <span x-text="[r.sku, 'In stock ' + num(availIn(r)) + ' ' + r.modeName].filter(Boolean).join(' · ')"></span>
                   <em class="down" x-show="Number(r.price) > 0 && Number(r.price) < r.listPrice" x-cloak x-text="'List price ' + taka(r.listPrice)"></em>
                 </div>
+                <label class="po-cell" x-show="r.modes.length > 1"><span class="po-k">Sold by</span>
+                  <select class="in" x-model="r.mode" @change="setMode(r, r.mode)" :aria-label="'Sold by for ' + r.name">
+                    <template x-for="m in r.modes" :key="m.id"><option :value="m.id" x-text="m.name" :selected="m.id === r.mode"></option></template>
+                  </select></label>
                 <label class="po-cell"><span class="po-k">Qty</span>
                   <input class="in num qty-in" type="text" inputmode="decimal" x-model="r.qty" @input="r.qty = r.qty.replace(/[^0-9.]/g, ''); r.err = stockErr(r)"
                          @keydown.enter.prevent="backToSearch()" :aria-label="'Quantity of ' + r.name"></label>

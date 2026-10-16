@@ -32,9 +32,9 @@
           <b class="tile-name" x-text="p.name"></b>
           <span class="tile-sku" x-text="p.sku"></span>
           <span class="tile-foot">
-            <b x-text="taka(p.price)"></b>
+            <b x-text="taka(p.def.price) + (p.modes.length > 1 ? ' / ' + p.def.name : '')"></b>
             <small :class="p.stock <= 0 ? 'out' : (p.alert && p.stock <= p.alert ? 'low' : '')"
-                   x-text="p.stock <= 0 ? 'Out' : num(p.stock) + ' left'"></small>
+                   x-text="p.stock <= 0 ? 'Out' : num(p.stock / p.def.factor) + ' ' + p.def.name + ' left'"></small>
           </span>
         </button>
       </template>
@@ -70,7 +70,7 @@
         <li :class="{ 'row-err': r.err, 'is-open': r.open }">
           <div class="cl-main" @click="r.open = !r.open">
             <b x-text="r.name"></b>
-            <span x-text="taka(r.price) + (Number(r.discount) > 0 ? ' · ' + (r.discount_type === 'percent' ? r.discount + '% off' : taka(r.discount) + ' off') : '')"></span>
+            <span x-text="taka(r.price) + ' / ' + r.modeName + (Number(r.discount) > 0 ? ' · ' + (r.discount_type === 'percent' ? r.discount + '% off' : taka(r.discount) + ' off') : '')"></span>
           </div>
           <div class="cl-qty">
             <button type="button" @click="bump(r, -1)" :aria-label="'One less ' + r.name">−</button>
@@ -79,6 +79,10 @@
           </div>
           <b class="cl-amt" x-text="taka(lineOf(r))"></b>
           <div class="cl-edit" x-show="r.open" x-cloak>
+            <label x-show="r.modes.length > 1"><span>Sold by</span>
+              <select class="in" x-model="r.mode" @change="setMode(r, r.mode)">
+                <template x-for="m in r.modes" :key="m.id"><option :value="m.id" x-text="m.name" :selected="m.id === r.mode"></option></template>
+              </select></label>
             <label><span>Price</span><input class="in num" type="text" inputmode="decimal" x-model="r.price" @input="r.price = r.price.replace(/[^0-9.]/g, ''); r.err = stockErr(r)"></label>
             <label><span>Discount</span>
               <span class="in-unit"><input class="in num" type="text" inputmode="decimal" placeholder="0" x-model="r.discount" @input="r.discount = r.discount.replace(/[^0-9.]/g, '')">

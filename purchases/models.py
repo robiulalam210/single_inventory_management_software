@@ -465,6 +465,11 @@ class Purchase(models.Model):
                 product = Product.objects.select_for_update().get(pk=item.product_id)
                 product.stock_qty -= item.qty
                 product.save(update_fields=['stock_qty', 'updated_at'])
+            try:
+                from purchases.batches import void_for_purchase
+                void_for_purchase(self)
+            except Exception:
+                logger.exception("Batch void failed for purchase %s", self.pk)
 
             # যতটুকু টাকা দেওয়া হয়েছিল, account এ ফেরত — Transaction নিজেই balance বাড়ায়
             if self.paid_amount > 0 and self.account_id:
@@ -752,6 +757,13 @@ class PurchaseItem(models.Model):
                     product.stock_qty += stock_change
                 
                 product.save()
+
+                # ব্যাচ / মেয়াদ রেকর্ড (ব্যর্থ হলে ক্রয় আটকাবে না)
+                try:
+                    from purchases.batches import sync_for_purchase_item
+                    sync_for_purchase_item(self)
+                except Exception:
+                    logger.exception("Batch sync failed for purchase item %s", self.pk)
                 
                 if not hasattr(self.purchase, '_updating_totals'):
                     self.purchase.update_totals()
@@ -768,6 +780,12 @@ class PurchaseItem(models.Model):
         try:
             product.stock_qty -= self.qty
             product.save()
+
+            try:
+                from purchases.batches import remove_for_purchase_item
+                remove_for_purchase_item(self)
+            except Exception:
+                logger.exception("Batch removal failed for purchase item %s", self.pk)
             
             super().delete(*args, **kwargs)
             
@@ -791,3 +809,26 @@ class PurchaseItem(models.Model):
             'batch_no': self.batch_no,
             'expiry_date': self.expiry_date.isoformat() if self.expiry_date else None,
         }
+
+class ProductBatch(models.Model):
+    """ক্রয়ের প্রতিটি আইটেম থেকে একটা ব্যাচ — মেয়াদ (expiry) ও বাকি স্টক ট্র্যাক করতে।
+    বিক্রির সময় FEFO (যার মেয়াদ আগে শেষ হবে সে আগে) নিয়মে এখান থেকে কমে।"""
+    product = models.ForeignKey('products.Product', on_delete=models.CASCADE, related_name='batches')
+    purchase_item = models.OneToOneField(
+        'purchases.PurchaseItem', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='batch')
+    batch_no = models.CharField(max_length=50, blank=True, null=True)
+    expiry_date = models.DateField(blank=True, null=True)
+    qty_received = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal('0'))
+    qty_remaining = models.DecimalField(max_digits=12, decimal_places=3, default=Decimal('0'))
+    received_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['expiry_date', 'received_at', 'id']
+        indexes = [
+            models.Index(fields=['product', 'expiry_date']),
+            models.Index(fields=['product', 'qty_remaining']),
+        ]
+
+    def __str__(self):
+        return f"{self.product_id} / {self.batch_no or 'no-batch'} ({self.qty_remaining})"

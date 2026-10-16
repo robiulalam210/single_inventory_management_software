@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from django.core.cache import cache
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Prefetch, Sum
 from django.http import JsonResponse
 from django.shortcuts import render
 from django.urls import reverse
@@ -17,7 +17,7 @@ from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 from django.views.decorators.http import require_POST
 
 from core.models import BusinessProfile
-from products.models import Product
+from products.models import Product, ProductSaleMode
 
 from .forms import HEX
 from .models import ShopOrder, ShopOrderItem, ShopSettings
@@ -60,16 +60,65 @@ def _unit_name(p):
     return (getattr(u, 'name', '') or '') if u else ''
 
 
+def _mode_info(psm):
+    """একটা ProductSaleMode এর অনলাইন-বিক্রির তথ্য। বেস ইউনিটে পূর্ণসংখ্যা না হলে None (স্টক পূর্ণসংখ্যা বলে)।
+    step: এক ক্লিকে কত বাড়বে — কাস্টম ওজন (unit-type, ফ্যাক্টর ≤ ১, যেমন গ্রাম) হলে ৫০, নইলে ১।"""
+    sm = psm.sale_mode
+    factor = Decimal(sm.conversion_factor)
+    custom = sm.price_type != 'flat' and factor <= 1
+    step = 50 if custom else 1
+    base = factor * step
+    if base <= 0 or base != base.to_integral_value():
+        return None
+    return {'sm': sm, 'custom': custom, 'step': step, 'base': int(base), 'factor': factor}
+
+
+def _modes_for(p, final_default):
+    """পণ্যের সক্রিয় সেল মোড → শপের প্যাক/ওজন বাটন। কোনো মোড না থাকলে একটাই ডিফল্ট (পুরনো আচরণ)।"""
+    out = []
+    for psm in p.product_sale_modes.all():
+        info = _mode_info(psm)
+        if info is None:
+            continue
+        price = psm.get_final_price(info['step']).quantize(Decimal('0.01'))
+        if price <= 0 or p.stock_qty < info['base']:
+            continue
+        if psm.sale_mode.price_type == 'flat':
+            raw = (psm.flat_price or Decimal('0')) * info['step']
+        else:
+            raw = (psm.unit_price or Decimal('0')) * info['base']
+        on_sale = raw > price
+        out.append({
+            'id': psm.sale_mode_id, 'name': psm.sale_mode.name, 'custom': info['custom'],
+            'step': info['step'], 'base': info['base'],
+            'price': float(price), 'old': float(raw) if on_sale else None,
+            'off': int(round((1 - price / raw) * 100)) if on_sale else 0,
+            '_order': (info['custom'], -info['base']),
+        })
+    out.sort(key=lambda m: m['_order'])
+    for m in out:
+        del m['_order']
+    if out:
+        return out
+    sell = p.selling_price
+    on_sale = final_default < sell and sell > 0
+    return [{'id': 0, 'name': _unit_name(p) or 'Each', 'custom': False, 'step': 1, 'base': 1,
+             'price': float(final_default), 'old': float(sell) if on_sale else None,
+             'off': int(round((1 - final_default / sell) * 100)) if on_sale else 0}]
+
+
 def _product_dict(p, new_after):
     sell, final = p.selling_price, p.final_price
-    on_sale = final < sell and sell > 0
+    modes = _modes_for(p, final)
+    first = modes[0]
     return {
         'id': p.id,
         'name': p.name,
-        'price': float(final),
-        'old': float(sell) if on_sale else None,
-        'off': int(round((1 - final / sell) * 100)) if on_sale else 0,
-        'stock': p.stock_qty,
+        'modes': modes,
+        'price': first['price'],
+        'old': first['old'],
+        'off': first['off'],
+        'stock': p.stock_qty,   # বেস ইউনিটে (গ্রাম/পিস); মোড অনুযায়ী কতটা বিক্রি যাবে তা modes[].base দিয়ে ক্লায়েন্ট হিসাব করে
         'image': p.image.url if p.image else '',
         'cat': p.category_id or 0,
         'catName': p.category.name if p.category_id else '',
@@ -85,9 +134,13 @@ def _render_store(request):
     ss = ShopSettings.load()
     business = BusinessProfile.get()
     now = timezone.now()
+    modes_qs = ProductSaleMode.objects.filter(is_active=True, sale_mode__is_active=True).select_related('sale_mode')
     qs = (Product.objects.filter(is_active=True, stock_qty__gt=0)
-          .select_related('category', 'unit', 'brand').order_by('-created_at')[:500])
+          .select_related('category', 'unit', 'brand')
+          .prefetch_related(Prefetch('product_sale_modes', queryset=modes_qs))
+          .order_by('-created_at')[:500])
     products = [_product_dict(p, now - timedelta(days=NEW_DAYS)) for p in qs]
+    products = [p for p in products if p['modes']]
     by_id = {p['id']: p for p in products}
 
     cats = {}
@@ -166,15 +219,15 @@ def place_order_view(request):
     if not PHONE_RE.match(phone):
         return JsonResponse({'ok': False, 'error': 'Please enter a valid phone number.'}, status=400)
 
-    # ঝুড়ি: product id → qty (দাম কখনো client থেকে নেওয়া হয় না)
+    # ঝুড়ি: (product id, sale mode id) → qty (দাম কখনো client থেকে নেওয়া হয় না)
     wanted = {}
     for row in (data.get('items') or [])[:MAX_ITEMS]:
         try:
-            pid, qty = int(row.get('id')), int(row.get('qty'))
+            pid, mid, qty = int(row.get('id')), int(row.get('mode') or 0), int(row.get('qty'))
         except (TypeError, ValueError, AttributeError):
             continue
         if qty > 0:
-            wanted[pid] = wanted.get(pid, 0) + qty
+            wanted[(pid, mid)] = wanted.get((pid, mid), 0) + qty
     if not wanted:
         return JsonResponse({'ok': False, 'error': 'Your cart is empty.'}, status=400)
 
@@ -182,19 +235,37 @@ def place_order_view(request):
     # Cancel করলে ফেরত আসে। row lock এর কারণে POS ও অনলাইন একসাথে একই stock কিনতে পারে না।
     try:
         with transaction.atomic():
+            pids = {pid for pid, _ in wanted}
             products = {p.id: p for p in Product.objects.select_for_update()
-                        .filter(is_active=True, id__in=wanted.keys())}
-            lines, subtotal = [], Decimal('0.00')
-            for pid, qty in wanted.items():
+                        .filter(is_active=True, id__in=pids)}
+            psms = {(x.product_id, x.sale_mode_id): x for x in ProductSaleMode.objects
+                    .filter(product_id__in=pids, is_active=True, sale_mode__is_active=True).select_related('sale_mode')}
+            has_modes = {pid for pid, _ in psms}
+            lines, subtotal, need = [], Decimal('0.00'), {}
+            for (pid, mid), qty in wanted.items():
                 p = products.get(pid)
                 if p is None:
                     raise ValueError('A product in your cart is no longer available. Please refresh.')
-                if p.stock_qty < qty:
-                    raise ValueError(f"Only {p.stock_qty} of '{p.name}' in stock.")
-                unit_price = p.final_price
-                line = (unit_price * qty).quantize(Decimal('0.01'))
-                lines.append((p, qty, unit_price, line))
+                if mid == 0:
+                    if pid in has_modes:
+                        raise ValueError(f"Please choose a pack size for '{p.name}'. Refresh the page and try again.")
+                    sm, mode_name, base, line = None, '', qty, (p.final_price * qty).quantize(Decimal('0.01'))
+                else:
+                    psm = psms.get((pid, mid))
+                    info = _mode_info(psm) if psm else None
+                    if info is None or qty % info['step']:
+                        raise ValueError(f"'{p.name}' is not available in that size anymore. Please refresh.")
+                    sm, mode_name = psm.sale_mode, psm.sale_mode.name
+                    base = int(info['factor'] * qty)
+                    line = psm.get_final_price(qty).quantize(Decimal('0.01'))
+                if line <= 0:
+                    raise ValueError(f"'{p.name}' has no price set. Please refresh.")
+                need[pid] = need.get(pid, 0) + base
+                lines.append((p, sm, mode_name, qty, base, (line / qty).quantize(Decimal('0.01')), line))
                 subtotal += line
+            for pid, n in need.items():
+                if products[pid].stock_qty < n:
+                    raise ValueError(f"Not enough '{products[pid].name}' in stock. Please reduce the quantity.")
             delivery = ss.delivery_for(subtotal)
             total = subtotal + delivery
 
@@ -202,12 +273,13 @@ def place_order_view(request):
                                              address=address, note=note, delivery_charge=delivery,
                                              total=total, stock_deducted=True)
             ShopOrderItem.objects.bulk_create([
-                ShopOrderItem(order=order, product=p, product_name=p.name, unit_price=up, qty=qty, line_total=line)
-                for p, qty, up, line in lines
+                ShopOrderItem(order=order, product=p, product_name=p.name, unit_price=up, qty=qty, line_total=line,
+                              sale_mode=sm, mode_name=mn, base_qty=base if sm else 0)
+                for p, sm, mn, qty, base, up, line in lines
             ])
-            for p, qty, _, _ in lines:
-                p.stock_qty -= qty
-                p.save(update_fields=['stock_qty'])
+            for pid, n in need.items():
+                products[pid].stock_qty -= n
+                products[pid].save(update_fields=['stock_qty'])
     except ValueError as e:
         return JsonResponse({'ok': False, 'error': str(e)}, status=409)
     cache.set(key, (cache.get(key) or 0) + 1, WINDOW_SECONDS)
@@ -260,7 +332,8 @@ def track_order_view(request):
         'updated': timezone.localtime(order.updated_at).strftime('%d %b %Y, %I:%M %p'),
         'name': order.customer_name,
         'address': order.address,
-        'items': [{'name': i.product_name, 'qty': i.qty, 'price': float(i.unit_price), 'total': float(i.line_total)}
+        'items': [{'name': i.product_name + (' · ' + i.mode_name if i.mode_name else ''), 'qty': i.qty,
+                   'price': float(i.unit_price), 'total': float(i.line_total)}
                   for i in order.items.all()],
         'subtotal': float(subtotal),
         'delivery': float(order.delivery_charge),

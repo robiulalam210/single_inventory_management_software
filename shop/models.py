@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import ROUND_CEILING, Decimal
 
 from django.db import models, transaction
 
@@ -56,15 +56,18 @@ class ShopOrder(models.Model):
             return
         items = list(self.items.all())
         products = self._locked_products()
+        need = {}                                  # product_id → বেস ইউনিটে মোট দরকার (গ্রাম/পিস)
         for it in items:
-            p = products.get(it.product_id)
-            if p is None:
+            if products.get(it.product_id) is None:
                 raise ValueError(f"'{it.product_name}' is no longer in the inventory.")
-            if p.stock_qty < it.qty:
-                raise ValueError(f"Not enough stock for '{it.product_name}' (in stock: {p.stock_qty}, ordered: {it.qty}).")
+            need[it.product_id] = need.get(it.product_id, 0) + it.stock_need
         for it in items:
             p = products[it.product_id]
-            p.stock_qty -= it.qty
+            if p.stock_qty < need[it.product_id]:
+                raise ValueError(f"Not enough stock for '{it.product_name}' (in stock: {p.stock_qty}, ordered: {need[it.product_id]}).")
+        for pid, qty in need.items():
+            p = products[pid]
+            p.stock_qty -= qty
             p.save(update_fields=['stock_qty'])
         self.stock_deducted = True
 
@@ -76,7 +79,7 @@ class ShopOrder(models.Model):
         for it in self.items.all():
             p = products.get(it.product_id)
             if p is not None:
-                p.stock_qty += it.qty
+                p.stock_qty += it.stock_need
                 p.save(update_fields=['stock_qty'])
         self.stock_deducted = False
 
@@ -109,7 +112,22 @@ class ShopOrder(models.Model):
                     overall_delivery_type='fixed' if self.delivery_charge else None)
         sale.save()
         for it in items:
-            SaleItem(sale=sale, product=products[it.product_id], quantity=Decimal(it.qty), unit_price=it.unit_price).save()
+            # কাস্টমারকে অর্ডারের সময় যে দাম (line_total) বলা হয়েছে ইনভয়েসেও ঠিক সেটাই যাবে —
+            # পরে সেল মোডের দাম বদলে গেলেও। SaleItem দাম নতুন করে হিসাব করে না যদি unit_price দেওয়া থাকে।
+            kw = {}
+            unit_price = it.unit_price
+            if it.sale_mode_id:
+                is_flat = it.sale_mode.price_type == 'flat'
+                mult = Decimal(it.qty) if is_flat else Decimal(it.base_qty or it.qty)
+                per = (it.line_total / mult).quantize(Decimal('0.01'), rounding=ROUND_CEILING)
+                diff = per * mult - it.line_total           # রাউন্ডিং এর ছোট পার্থক্য ছাড় হিসেবে মিলিয়ে দেওয়া হয়
+                unit_price = per
+                if is_flat:
+                    kw['flat_price'] = per
+                if diff > 0:
+                    kw.update(discount_type='fixed', discount=diff)
+            SaleItem(sale=sale, product=products[it.product_id], sale_mode=it.sale_mode,
+                     quantity=Decimal(it.qty), unit_price=unit_price, **kw).save()
         sale.refresh_from_db()
         return sale
 
@@ -138,11 +156,18 @@ class ShopOrderItem(models.Model):
     product = models.ForeignKey('products.Product', on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
     product_name = models.CharField(max_length=255)
     unit_price = models.DecimalField(max_digits=12, decimal_places=2)
-    qty = models.PositiveIntegerField()
+    qty = models.PositiveIntegerField(help_text='সেল মোডের এককে পরিমাণ (প্যাক সংখ্যা / গ্রাম / কেজি)')
     line_total = models.DecimalField(max_digits=12, decimal_places=2)
+    sale_mode = models.ForeignKey('products.SaleMode', on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    mode_name = models.CharField(max_length=60, blank=True, default='')
+    base_qty = models.PositiveIntegerField(default=0, help_text='বেস ইউনিটে (যেমন গ্রাম) স্টক থেকে যত কমবে; 0 = qty')
+
+    @property
+    def stock_need(self):
+        return self.base_qty or self.qty
 
     def __str__(self):
-        return f"{self.product_name} × {self.qty}"
+        return f"{self.product_name}{' · ' + self.mode_name if self.mode_name else ''} × {self.qty}"
 
 
 class ShopSettings(models.Model):

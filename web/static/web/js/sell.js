@@ -34,13 +34,44 @@
   }
   const charge = (base, v, type) => (n(v) > 0 ? r2(type === 'percent' ? base * n(v) / 100 : n(v)) : 0);
 
+  // ── সেল মোড (কেজি / গ্রাম / প্যাক) — backend এর ProductSaleMode.get_final_price এর সাথে মেলানো ──
+  // দাম সবসময় "প্রতি সেল-মোড-ইউনিট": flat → flat_price; unit/tier → unit_price × factor।
+  // স্টক base unit এ (যেমন গ্রাম); qty × factor = base পরিমাণ।
+  const isWeightUnit = (u) => /^(g|gm|gram|grams|গ্রাম)$/i.test(String(u || '').trim());
+  function modesOf(p, basePrice, unitLabel) {
+    const out = [{ id: '', name: unitLabel || 'Unit', code: '', type: 'base', factor: 1, price: basePrice, flat: false }];
+    (p.sale_modes || []).filter(m => m && m.is_active !== false).forEach(m => {
+      const factor = n(m.conversion_factor) || 1;
+      const flat = m.price_type === 'flat';
+      const per = flat ? n(m.flat_price != null ? m.flat_price : m.effective_flat_price)
+                       : r2((n(m.unit_price != null ? m.unit_price : m.effective_unit_price) || basePrice) * factor);
+      if (!(per > 0)) return;
+      out.push({ id: String(m.sale_mode_id), name: m.sale_mode_name, code: m.sale_mode_code || '', type: m.price_type,
+                 factor, price: per, flat });
+    });
+    // "গ্রাম" মতো factor=1 unit-মোড থাকলে আলাদা base-ইউনিট অপশন (একই জিনিস) বাদ
+    if (out.length > 1 && out.slice(1).some(m => m.factor === 1 && !m.flat)) out.shift();
+    return out;
+  }
+  // যে মোডে প্রথমে লাইন যোগ হবে: "kg" কোড থাকলে সেটা, নইলে সবচেয়ে ছোট প্যাক (factor > 1), নইলে base ইউনিট
+  function defaultMode(modes) {
+    const kg = modes.find(m => m.code === 'kg');
+    if (kg) return kg;
+    const packs = modes.filter(m => m.id && m.factor > 1).sort((a, b) => a.factor - b.factor);
+    return packs[0] || modes[0];
+  }
+
   function product(p) {
     const dt = p.discount_type === 'percentage' || p.discount_type === 'percent' ? 'percent' : 'fixed';
+    const unit = (p.unit_info && (p.unit_info.code || p.unit_info.name)) || '';
+    const price = n(p.selling_price);
+    const modes = modesOf(p, price, unit);
+    const def = defaultMode(modes);
     return {
       id: p.id, name: p.name, sku: p.sku || '',
       stock: n(p.stock_qty), alert: n(p.alert_quantity),
-      unit: (p.unit_info && (p.unit_info.code || p.unit_info.name)) || '',
-      price: n(p.selling_price),
+      unit, weight: isWeightUnit(unit),
+      price: def.price, basePrice: price, modes, def,
       disc: p.discount_applied ? n(p.discount_value) : 0, discType: dt,
       cat: (p.category_info && p.category_info.name) || 'Other',
       image: p.image || '',
@@ -112,7 +143,8 @@
       // ───── cart ─────
       addProduct(p, qty) {
         this.errors.items = '';
-        const ex = this.rows.find(r => r.product_id === p.id);
+        const m = p.def;
+        const ex = this.rows.find(r => r.product_id === p.id && r.mode === m.id);
         if (ex) {
           ex.qty = String(r3(n(ex.qty) + (qty || 1)));
           ex.err = this.stockErr(ex);
@@ -120,22 +152,39 @@
         }
         const row = {
           key: ++seq, product_id: p.id, name: p.name, sku: p.sku, stock: p.stock, unit: p.unit, cat: p.cat,
-          qty: String(qty || 1), price: String(p.price), listPrice: p.price,
+          modes: p.modes, mode: m.id, modeName: m.name, factor: m.factor, flat: m.flat, weight: p.weight,
+          qty: String(qty || 1), price: String(m.price), listPrice: m.price,
           discount: p.disc ? String(p.disc) : '', discount_type: p.discType, err: '', open: false,
         };
         row.err = this.stockErr(row);
         this.rows.push(row);
         return row;
       },
+      // সারির সেল মোড বদলালে: দাম ওই মোডের দামে ফিরে যায়, পরিমাণ একই থাকে
+      setMode(r, id) {
+        const m = r.modes.find(x => x.id === String(id)) || r.modes[0];
+        r.mode = m.id; r.modeName = m.name; r.factor = m.factor; r.flat = m.flat;
+        r.price = String(m.price); r.listPrice = m.price;
+        r.err = this.stockErr(r);
+      },
+      step(r) { return r.weight && r.factor <= 1 ? 50 : 1; },      // গ্রামে ৫০ করে বাড়ে
+      baseQty(r) { return n(r.qty) * (r.factor || 1); },
+      availIn(r) { return r.stock / (r.factor || 1); },              // এই মোডের এককে কতটা আছে
+      // কার্টে এই পণ্য মোট কত base ইউনিট (সব মোড মিলিয়ে)
+      baseInCart(pid) { return this.rows.filter(x => x.product_id === pid).reduce((s, x) => s + this.baseQty(x), 0); },
       stockErr(r) {
         const q = n(r.qty);
         if (!(q > 0)) return 'Quantity must be above 0.';
-        if (q > r.stock) return r.stock > 0 ? `Only ${numFmt.format(r.stock)} in stock.` : 'Out of stock.';
+        const used = this.baseInCart(r.product_id) - this.baseQty(r);       // একই পণ্যের অন্য সারি
+        if (this.baseQty(r) + used > r.stock + 1e-9) {
+          const left = Math.max(0, r.stock - used) / (r.factor || 1);
+          return r.stock > 0 ? `Only ${numFmt.format(Math.floor(left * 1000) / 1000)} ${r.modeName} available.` : 'Out of stock.';
+        }
         if (!(n(r.price) > 0)) return 'Enter the selling price.';
         return '';
       },
       bump(r, d) {
-        const q = r3(n(r.qty) + d);
+        const q = r3(n(r.qty) + d * this.step(r));
         if (q <= 0) { this.remove(r); return; }
         r.qty = String(q);
         r.err = this.stockErr(r);
@@ -191,10 +240,7 @@
           sale_type: 'retail',
           sale_date: this.date,
           sale_by: Number(this.seller || this.me.id),
-          items: this.rows.map(r => ({
-            product_id: r.product_id, quantity: r3(r.qty).toFixed(3), unit_price: r2(r.price).toFixed(2),
-            discount: r2(r.discount).toFixed(2), discount_type: r.discount_type,
-          })),
+          items: this.rows.map(r => this.itemPayload(r)),
           overall_discount: r2(this.ch.discount).toFixed(2), overall_discount_type: this.ch.discount_type,
           vat: r2(this.ch.vat).toFixed(2), overall_vat_type: this.ch.vat_type,
           service_charge: r2(this.ch.service).toFixed(2), overall_service_type: this.ch.service_type,
@@ -206,6 +252,19 @@
         if (this.cust.mode === 'saved') body.customer_id = Number(this.cust.id);
         if (this.receivedNum > 0) { body.payment_method = this.pay.method; body.account_id = Number(this.pay.account); }
         return body;
+      },
+      // সেল মোড থাকলে: quantity = মোডের এককে (প্যাক সংখ্যা / গ্রাম / কেজি); backend নিজে base এ বদলায়।
+      //   flat  → flat_price = প্রতি প্যাকের দাম (subtotal = flat_price × quantity)
+      //   unit  → unit_price = প্রতি base ইউনিটের দাম (দাম ÷ factor)
+      itemPayload(r) {
+        const it = { product_id: r.product_id, quantity: r3(r.qty).toFixed(3),
+          discount: r2(r.discount).toFixed(2), discount_type: r.discount_type };
+        if (r.mode) {
+          it.sale_mode_id = Number(r.mode);
+          if (r.flat) { it.flat_price = r2(r.price).toFixed(2); it.unit_price = r2(r.price).toFixed(2); }
+          else it.unit_price = r2(n(r.price) / (r.factor || 1)).toFixed(2);
+        } else it.unit_price = r2(r.price).toFixed(2);
+        return it;
       },
       async submit() {
         this.serverError = '';
@@ -355,10 +414,10 @@
         return this.catalog.filter(p => (!this.cat || p.cat === this.cat) &&
           (!q || p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q))).slice(0, 120);
       },
-      inCart(p) { const r = this.rows.find(x => x.product_id === p.id); return r ? n(r.qty) : 0; },
+      inCart(p) { return this.rows.filter(x => x.product_id === p.id).reduce((s, x) => s + n(x.qty), 0); },
       tap(p) {
         if (p.stock <= 0) { this.say(`${p.name} is out of stock`); return; }
-        if (this.inCart(p) + 1 > p.stock) { this.say(`Only ${numFmt.format(p.stock)} ${p.name} in stock`); return; }
+        if (this.baseInCart(p.id) + p.def.factor > p.stock + 1e-9) { this.say(`Only ${numFmt.format(p.stock / p.def.factor)} ${p.def.name} of ${p.name} in stock`); return; }
         this.addProduct(p);
         this.say(`${p.name} added`);
       },
