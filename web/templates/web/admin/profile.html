@@ -1,0 +1,100 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/profile.js' %}"></script>{% endblock %}
+{% block content %}
+{{ cp_init|json_script:"cp-init" }}
+<div x-data="companyProfile(JSON.parse(document.getElementById('cp-init').textContent))" class="cp-wrap">
+
+  <template x-if="error">
+    <section class="panel empty">
+      <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+      <h2>Couldn't load your business details</h2><p x-text="error"></p>
+      <button class="btn btn-ghost" onclick="location.reload()">Try again</button>
+    </section>
+  </template>
+
+  <template x-if="co">
+    <div class="cp-grid">
+      <form class="panel cp-form" @submit.prevent="save()" novalidate>
+        <h3>Shop details</h3>
+        <p class="cp-sub">Printed at the top of every invoice, receipt and statement.</p>
+
+        <div class="cp-logo" :class="{ 'is-drag': drag }" @dragover.prevent="canEdit && (drag = true)" @dragleave="drag = false" @drop.prevent="canEdit && onDrop($event)">
+          <span class="cp-logo-img" :style="co.logo ? 'background-image:url(' + co.logo + ')' : ''">
+            <span x-show="!co.logo" x-text="initial"></span>
+            <i x-show="logoBusy" class="cp-spin"></i>
+          </span>
+          <div>
+            <b>Logo</b>
+            <small>Square works best. PNG, JPG or WebP, up to 5 MB.</small>
+            <template x-if="canEdit"><span class="cp-logo-act">
+              <button type="button" class="btn btn-ghost btn-sm" @click="pick()" :disabled="logoBusy" x-text="co.logo ? 'Change' : 'Upload logo'"></button>
+              <button type="button" class="btn-link danger" x-show="co.logo" @click="removeLogo()" :disabled="logoBusy">Remove</button>
+            </span></template>
+            <p class="fld-err" x-show="logoErr" x-text="logoErr"></p>
+          </div>
+          <input type="file" accept="image/png,image/jpeg,image/webp" x-ref="logoIn" class="sr-only" @change="upload($event.target.files[0])">
+        </div>
+
+        <fieldset :disabled="!canEdit" class="cp-fields">
+          <div class="fld" :class="{ 'has-error': fe.name }">
+            <label class="fld-label" for="cp-name">Shop name <i>*</i></label>
+            <input id="cp-name" class="in" type="text" maxlength="150" x-model="f.name" @input="fe.name = ''">
+            <p class="fld-err" x-show="fe.name" x-text="fe.name"></p>
+          </div>
+          <div class="fld-row">
+            <div class="fld" :class="{ 'has-error': fe.phone }"><label class="fld-label" for="cp-phone">Phone</label>
+              <input id="cp-phone" class="in" type="tel" maxlength="20" x-model="f.phone" @input="fe.phone = ''"><p class="fld-err" x-show="fe.phone" x-text="fe.phone"></p></div>
+            <div class="fld" :class="{ 'has-error': fe.email }"><label class="fld-label" for="cp-email">Email</label>
+              <input id="cp-email" class="in" type="email" maxlength="254" x-model="f.email" @input="fe.email = ''"><p class="fld-err" x-show="fe.email" x-text="fe.email"></p></div>
+          </div>
+          <div class="fld" :class="{ 'has-error': fe.address }">
+            <label class="fld-label" for="cp-addr">Address</label>
+            <textarea id="cp-addr" class="in" rows="3" x-model="f.address" placeholder="Shop no., road, area, city"></textarea>
+            <p class="fld-err" x-show="fe.address" x-text="fe.address"></p>
+          </div>
+          <div class="fld-row">
+            <div class="fld" :class="{ 'has-error': fe.trade_license }"><label class="fld-label" for="cp-tl">Trade licence no.</label>
+              <input id="cp-tl" class="in" type="text" maxlength="100" x-model="f.trade_license"><p class="fld-err" x-show="fe.trade_license" x-text="fe.trade_license"></p></div>
+            <div class="fld" :class="{ 'has-error': fe.website }"><label class="fld-label" for="cp-web">Website</label>
+              <input id="cp-web" class="in" type="text" maxlength="200" x-model="f.website" @input="fe.website = ''" placeholder="example.com"><p class="fld-err" x-show="fe.website" x-text="fe.website"></p></div>
+          </div>
+        </fieldset>
+        <p class="fld-hint" x-show="!canEdit">You can see these details but not change them. Ask an admin.</p>
+        <p class="modal-err" x-show="formError" x-text="formError"></p>
+
+        <div class="cp-bar" x-show="canEdit">
+          <span x-text="dirty ? 'You have unsaved changes' : 'All changes saved'" :class="{ 'is-dirty': dirty }"></span>
+          <button type="button" class="btn btn-ghost" @click="undo()" x-show="dirty" :disabled="saving">Undo</button>
+          <button type="submit" class="btn btn-primary" :disabled="saving || !dirty" x-text="saving ? 'Saving…' : 'Save changes'"></button>
+        </div>
+      </form>
+
+      <aside class="cp-side">
+        <section class="panel cp-preview">
+          <h3>On your invoices</h3>
+          <div class="cp-inv">
+            <div class="cp-inv-top">
+              <span class="cp-inv-logo" :style="co.logo ? 'background-image:url(' + co.logo + ')' : ''"><span x-show="!co.logo" x-text="initial"></span></span>
+              <div>
+                <b x-text="f.name || 'Your shop name'"></b>
+                <span x-text="f.address || 'Address'" :class="{ 'is-ph': !f.address }"></span>
+                <span x-text="[f.phone, f.email].filter(Boolean).join(' · ') || 'Phone · Email'" :class="{ 'is-ph': !f.phone && !f.email }"></span>
+              </div>
+              <em>INVOICE</em>
+            </div>
+            <i class="cp-inv-line"></i><i class="cp-inv-line s"></i><i class="cp-inv-line"></i>
+          </div>
+        </section>
+
+      </aside>
+    </div>
+  </template>
+
+  <template x-if="loading">
+    <div class="cp-grid"><div class="panel cp-form"><span class="sk-line" style="width:30%"></span><span class="sk-line" style="margin-top:20px"></span><span class="sk-line" style="margin-top:12px;width:70%"></span></div></div>
+  </template>
+
+  <div class="toast" x-show="toast" x-cloak x-transition.opacity role="status" x-text="toast"></div>
+</div>
+{% endblock %}

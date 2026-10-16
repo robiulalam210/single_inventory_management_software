@@ -1,0 +1,259 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/vendor/chart-4.4.7.umd.js' %}"></script><script src="{% static 'web/js/dashboard.js' %}"></script>{% endblock %}
+{% block content %}
+{{ dash_perms|json_script:"dash-perms" }}
+<div x-data="dashboard(JSON.parse(document.getElementById('dash-perms').textContent))">
+
+  <div class="greet">
+    <div>
+      <h2>{{ greeting }}, {{ web_user.name }}</h2>
+      <p>{{ today|date:"l, j F Y" }}</p>
+    </div>
+    <div class="greet-actions">
+      <div class="seg" role="tablist" aria-label="Period">
+        <template x-for="p in periods" :key="p.key">
+          <button type="button" role="tab" :aria-selected="(period === p.key).toString()"
+                  :class="{ 'is-on': period === p.key }" @click="setPeriod(p.key)" x-text="p.label"></button>
+        </template>
+      </div>
+      <button type="button" class="icon-btn" @click="load()" :disabled="loading" aria-label="Refresh" title="Refresh">
+        <span :class="{ spin: loading }">{% icon "refresh" 18 %}</span>
+      </button>
+    </div>
+  </div>
+
+  {# ── low stock banner (data: $store.lowStock, web/js/low_stock.js) ── #}
+  <template x-if="$store.lowStock && $store.lowStock.has">
+    <div class="notice ls-banner" :class="$store.lowStock.out > 0 ? 'notice-error' : 'notice-warn'" role="alert">
+      {% icon "alert" 18 %}
+      <span><b x-text="$store.lowStock.total + ' product' + ($store.lowStock.total === 1 ? '' : 's') + ' need restocking'"></b> — <span x-text="$store.lowStock.headline"></span>.</span>
+      <button type="button" class="btn btn-ghost btn-sm" @click="$store.lowStock.show()">View list</button>
+    </div>
+  </template>
+
+  {% if shop_url %}
+  <section class="panel dash-shop">
+    <div class="panel-head">
+      <h3>Online Shop</h3>
+      <span>{{ shop_pending }} new order{{ shop_pending|pluralize }} waiting</span>
+    </div>
+    <div class="panel-body shop-actions">
+      <a class="btn btn-primary" href="{% url 'web:shop_orders' %}">View orders{% if shop_pending %} ({{ shop_pending }}){% endif %}</a>
+      <a class="btn btn-ghost" href="{% url 'web:shop_settings' %}">Shop settings</a>
+      <a class="btn btn-ghost" href="{{ shop_url }}" target="_blank" rel="noopener">Open shop</a>
+    </div>
+  </section>
+  {% endif %}
+
+  {# ── error ── #}
+  <template x-if="error">
+    <section class="panel empty">
+      <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+      <h2>Couldn't load the dashboard</h2>
+      <p x-text="error"></p>
+      <button class="btn btn-ghost" @click="load()">Try again</button>
+    </section>
+  </template>
+
+  <template x-if="!error">
+  <div>
+    {# ── headline numbers ── #}
+    <div class="kpis">
+      <article class="kpi">
+        <header><span class="kpi-ic" style="--c:#2563eb">{% icon "cart" 18 %}</span>Sales</header>
+        <div class="kpi-val" :class="{ sk: loading && !d }" x-text="d ? taka(m.sales?.total) : '—'"></div>
+        <p x-show="d" x-cloak>
+          <span x-text="qty(m.sales?.count) + (m.sales?.count == 1 ? ' invoice' : ' invoices')"></span><template x-if="Number(m.sales?.total_due) > 0"><span>, <b class="txt-due" x-text="taka(m.sales?.total_due)"></b> due</span></template>
+        </p>
+      </article>
+      <article class="kpi">
+        <header><span class="kpi-ic" style="--c:#7c3aed">{% icon "truck" 18 %}</span>Purchases</header>
+        <div class="kpi-val" :class="{ sk: loading && !d }" x-text="d ? taka(m.purchases?.total) : '—'"></div>
+        <p x-show="d" x-cloak>
+          <span x-text="qty(m.purchases?.count) + (m.purchases?.count == 1 ? ' invoice' : ' invoices')"></span><template x-if="Number(m.purchases?.total_due) > 0"><span>, <b class="txt-due" x-text="taka(m.purchases?.total_due)"></b> to pay</span></template>
+        </p>
+      </article>
+      <article class="kpi">
+        <header><span class="kpi-ic" style="--c:#c2410c">{% icon "expense" 18 %}</span>Expenses</header>
+        <div class="kpi-val" :class="{ sk: loading && !d }" x-text="d ? taka(m.expenses?.total) : '—'"></div>
+        <p x-show="d" x-cloak x-text="qty(m.expenses?.count) + (m.expenses?.count == 1 ? ' entry' : ' entries') + (Number(m.incomes?.total) > 0 ? ', other income ' + taka(m.incomes?.total) : '')"></p>
+      </article>
+      <article class="kpi kpi-profit" :class="{ 'is-loss': d && Number(pl.net_profit) < 0 }">
+        <header>
+          <span class="kpi-ic" style="--c:#16a34a">{% icon "income" 18 %}</span>
+          <span x-text="d && Number(pl.net_profit) < 0 ? 'Net loss' : 'Net profit'">Net profit</span>
+        </header>
+        <div class="kpi-val" :class="{ sk: loading && !d }" x-text="d ? taka(pl.net_profit) : '—'"></div>
+        <p x-show="d" x-cloak
+           x-text="'Gross profit ' + taka(pl.gross_profit) + (Number(m.sales?.total) > 0 ? ', ' + Number(pl.profit_margin || 0).toFixed(1) + '% margin' : '')"></p>
+      </article>
+    </div>
+
+    <div class="dash-grid">
+      {# ── trend chart: last 7 / 30 days ── #}
+      <section class="panel span-2">
+        <div class="panel-head">
+          <h3>Sales, purchases &amp; expenses <span class="muted-inline" x-text="'· last ' + trendDays + ' days'"></span></h3>
+          <div class="seg seg-sm" role="tablist" aria-label="Chart range">
+            <button type="button" role="tab" :aria-selected="(trendDays === 7).toString()" :class="{ 'is-on': trendDays === 7 }" @click="setTrendDays(7)">7 days</button>
+            <button type="button" role="tab" :aria-selected="(trendDays === 30).toString()" :class="{ 'is-on': trendDays === 30 }" @click="setTrendDays(30)">30 days</button>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <div class="chart-box" x-show="trend && trendHasData && !trendError" x-cloak :class="{ 'is-busy': trendLoading }">
+            <canvas id="chart-trend" role="img" :aria-label="trendSummary"></canvas>
+          </div>
+          <div class="chart-empty" x-show="trend && !trendHasData && !trendError" x-cloak>
+            {% icon "income" 22 %}<p>No sales, purchases or expenses in the last <span x-text="trendDays"></span> days.</p>
+          </div>
+          <div class="chart-empty" x-show="trendError" x-cloak>
+            {% icon "alert" 22 %}<p x-text="trendError"></p>
+            <button type="button" class="btn btn-ghost" @click="loadTrend()">Try again</button>
+          </div>
+          <div class="chart-empty" x-show="!trend && !trendError"><p>Loading chart…</p></div>
+        </div>
+      </section>
+
+      {# ── expense breakdown ── #}
+      <section class="panel">
+        <div class="panel-head">
+          <h3>Where expenses go</h3>
+          <span x-text="'Last ' + trendDays + ' days'"></span>
+        </div>
+        <div class="chart-wrap">
+          <div class="chart-box chart-box-sm" x-show="expenseHasData && !trendError" x-cloak :class="{ 'is-busy': trendLoading }">
+            <canvas id="chart-expense" role="img" :aria-label="expenseSummary"></canvas>
+          </div>
+          <div class="chart-empty chart-empty-sm" x-show="trend && !expenseHasData && !trendError" x-cloak>
+            <p>No expenses recorded in this period.</p>
+          </div>
+          <div class="chart-empty chart-empty-sm" x-show="!trend && !trendError"><p>Loading chart…</p></div>
+        </div>
+      </section>
+
+      {# ── money flow ── #}
+      <section class="panel span-2">
+        <div class="panel-head">
+          <h3>Money flow <span class="muted-inline" x-text="periodNoun"></span></h3>
+          <span x-show="d" x-cloak>Net <b :class="netCash < 0 ? 'txt-due' : 'txt-ok'" x-text="taka(netCash)"></b></span>
+        </div>
+        <div class="flow" role="list">
+          <template x-for="r in cash" :key="r.label">
+            <div class="flow-row" role="listitem" :title="r.hint + ': ' + taka(r.value)">
+              <div class="flow-label"><b x-text="r.label"></b><span x-text="r.hint"></span></div>
+              <div class="flow-track">
+                <div class="flow-bar" :class="r.dir === 'in' ? 'is-in' : 'is-out'" :style="'width:' + r.pct + '%'"></div>
+              </div>
+              <div class="flow-val" x-text="d ? taka(r.value) : '—'"></div>
+            </div>
+          </template>
+        </div>
+      </section>
+
+      {# ── stock alerts ── #}
+      <section class="panel">
+        <div class="panel-head"><h3>Stock alerts</h3></div>
+        <div class="alerts">
+          <div class="alert-box" :class="{ 'is-hot': d && d.stock_alerts?.out_of_stock > 0 }">
+            <span class="alert-n" x-text="d ? d.stock_alerts?.out_of_stock : '—'"></span>
+            <span>Out of stock</span>
+          </div>
+          <div class="alert-box" :class="{ 'is-warm': d && d.stock_alerts?.low_stock > 0 }">
+            <span class="alert-n" x-text="d ? d.stock_alerts?.low_stock : '—'"></span>
+            <span>Running low</span>
+          </div>
+        </div>
+        <template x-if="d && !d.stock_alerts?.out_of_stock && !d.stock_alerts?.low_stock">
+          <p class="panel-note ok">{% icon "check-circle" 16 %} Every product is above its alert quantity.</p>
+        </template>
+      </section>
+
+      {# ── recent activity ── #}
+      <section class="panel span-2" x-show="tabs.length">
+        <div class="panel-head">
+          <h3>Recent activity</h3>
+          <div class="tabs" role="tablist">
+            <template x-for="t in tabs" :key="t.key">
+              <button type="button" role="tab" :aria-selected="(tab === t.key).toString()"
+                      :class="{ 'is-on': tab === t.key }" @click="tab = t.key" x-text="t.label"></button>
+            </template>
+          </div>
+        </div>
+        <ul class="rows">
+          <template x-for="(r, i) in recent" :key="tab + i">
+            <li>
+              <div class="row-main"><b x-text="r.title"></b><span x-text="r.sub"></span></div>
+              <div class="row-date" x-text="date(r.date)"></div>
+              <div class="row-amt">
+                <b x-text="taka(r.amount)"></b>
+                <template x-if="Number(r.due) > 0"><span class="txt-due" x-text="taka(r.due) + ' due'"></span></template>
+              </div>
+            </li>
+          </template>
+          <template x-if="d && !recent.length">
+            <li class="rows-empty">Nothing recorded yet.</li>
+          </template>
+        </ul>
+      </section>
+
+      {# ── account balances ── #}
+      <section class="panel" x-show="perms.accounts">
+        <div class="panel-head">
+          <h3>Account balance</h3>
+          <span x-show="accounts && accounts.length" x-cloak x-text="taka(totalBalance)"></span>
+        </div>
+        <ul class="rows compact">
+          <template x-for="a in (accounts || [])" :key="a.id">
+            <li>
+              <div class="row-main"><b x-text="a.name"></b><span x-text="[a.ac_type, a.bank_name || a.ac_number].filter(Boolean).join(', ')"></span></div>
+              <div class="row-amt"><b :class="{ 'txt-due': Number(a.balance) < 0 }" x-text="taka(a.balance)"></b></div>
+            </li>
+          </template>
+          <template x-if="accounts && !accounts.length"><li class="rows-empty">No active accounts.</li></template>
+          <template x-if="!accounts"><li class="rows-empty">Loading…</li></template>
+        </ul>
+      </section>
+
+      {# ── top selling ── #}
+      <section class="panel" x-show="perms.reports">
+        <div class="panel-head"><h3>Best sellers <span class="muted-inline" x-text="periodNoun"></span></h3></div>
+        <ol class="rank">
+          <template x-for="(p, i) in (top || [])" :key="p.product_id">
+            <li>
+              <span class="rank-n" x-text="i + 1"></span>
+              <div class="row-main">
+                <b x-text="p.product_name"></b><span x-text="qty(p.total_sold_quantity) + ' sold'"></span>
+                <div class="rank-bar" aria-hidden="true"><i :style="'width:' + topPct(p) + '%'"></i></div>
+              </div>
+              <b class="row-amt" x-text="taka(p.total_sold_price)"></b>
+            </li>
+          </template>
+          <template x-if="top && !top.length"><li class="rows-empty">No sales in this period.</li></template>
+        </ol>
+      </section>
+
+      {# ── low stock ── #}
+      <section class="panel span-2" x-show="perms.reports">
+        <div class="panel-head"><h3>Restock soon</h3><span x-show="low && low.length" x-cloak>Lowest stock first</span></div>
+        <ul class="rows">
+          <template x-for="p in (low || [])" :key="p.product_id">
+            <li>
+              <div class="row-main"><b x-text="p.product_name"></b><span x-text="[p.category, p.brand].filter(Boolean).join(', ')"></span></div>
+              <div class="row-date" x-text="'Alert at ' + qty(p.alert_quantity)"></div>
+              <div class="row-amt">
+                <span class="stock-pill" :class="Number(p.total_stock_quantity) <= 0 ? 'is-out' : 'is-low'"
+                      x-text="Number(p.total_stock_quantity) <= 0 ? 'Out of stock' : qty(p.total_stock_quantity) + ' left'"></span>
+              </div>
+            </li>
+          </template>
+          <template x-if="low && !low.length">
+            <li class="rows-empty">{% icon "check-circle" 16 %} Nothing needs restocking.</li>
+          </template>
+        </ul>
+      </section>
+    </div>
+  </div>
+  </template>
+</div>
+{% endblock %}

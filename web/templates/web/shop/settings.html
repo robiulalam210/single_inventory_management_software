@@ -1,0 +1,54 @@
+{% extends "web/base.html" %}
+{% block content %}
+<form method="post" enctype="multipart/form-data" novalidate class="shop-page set-page">
+  {% csrf_token %}
+
+  <section class="panel">
+    <div class="panel-head">
+      <h3>Your shop page</h3>
+      <span>Customers see this at your home page</span>
+    </div>
+    <div class="panel-body">
+      <div class="shop-actions">
+        <a class="btn btn-ghost" href="{{ shop_url }}" target="_blank" rel="noopener">Open shop</a>
+        <a class="btn btn-ghost" href="{% url 'web:shop_orders' %}">Online orders</a>
+      </div>
+    </div>
+  </section>
+
+  {% if form.non_field_errors %}<p class="field-error">{{ form.non_field_errors }}</p>{% endif %}
+
+  {% for title, hint, fields in groups %}
+  <section class="panel">
+    <div class="panel-head"><h3>{{ title }}</h3><span>{{ hint }}</span></div>
+    <div class="panel-body">
+      <div class="set-grid">
+        {% for f in fields %}
+        <div class="field{% if f.field.widget.input_type == "checkbox" %} wide{% endif %}{% if f.name == "about_text" or f.name == "hero_subtitle" or f.name == "announcement" or f.name == "address" %} wide{% endif %}">
+          {% if f.field.widget.input_type == "checkbox" %}
+            <label class="set-check">{{ f }} <span>{{ f.label }}</span></label>
+          {% else %}
+            <label class="field-label" for="{{ f.id_for_label }}">{{ f.label }}</label>
+            {% if f.field.widget.input_type == "file" %}
+              <div class="set-file">
+                {% if f.name == "hero_image" and current_hero %}<img src="{{ current_hero }}" alt="Current banner">{% endif %}
+                <input type="file" name="{{ f.html_name }}" id="{{ f.id_for_label }}" accept="image/*">
+              </div>
+            {% else %}
+              {{ f }}
+            {% endif %}
+          {% endif %}
+          {% if f.help_text %}<small>{{ f.help_text }}</small>{% endif %}
+          {% for e in f.errors %}<span class="field-err">{{ e }}</span>{% endfor %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+  {% endfor %}
+
+  <div class="set-save">
+    <button class="btn btn-primary" type="submit">Save settings</button>
+  </div>
+</form>
+{% endblock %}

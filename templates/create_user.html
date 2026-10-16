@@ -1,0 +1,11 @@
+{% extends "base_admin.html" %}
+{% block title %}Create User – Inventory Management System{% endblock %}
+{% block content %}
+    <h2>Create New User</h2>
+    <form method="post">
+        {% csrf_token %}
+        {{ form.as_p }}
+        <button type="submit" style="background:#1a73e8;color:#fff;padding:12px 32px;border:none;border-radius:4px;font-weight:bold;cursor:pointer;width:100%;transition:background .2s;">Create</button>
+    </form>
+    <a href="{% url 'user_list' %}" class="button" style="background:#e4e7eb; color:#2d3a4b;">Back to Users</a>
+{% endblock %}

@@ -1,0 +1,202 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/payroll.js' %}"></script>{% endblock %}
+{% block content %}
+<div x-data="salarySheet()" @keydown.escape.window="editOpen = false; payOpen = false; confirm = null; slipOpen = false">
+
+  <section class="panel filters">
+    <div class="f-row">
+      <div class="rp-pick">
+        <button type="button" class="icon-btn" @click="move(-1)" aria-label="Previous month">{% icon "chevron-left" 18 %}</button>
+        <input type="month" class="in" :value="month" @change="setMonth($event.target.value)" aria-label="Month">
+        <button type="button" class="icon-btn" @click="move(1)" :disabled="isCurrent || isFuture" aria-label="Next month">{% icon "chevron-right" 18 %}</button>
+      </div>
+      <div class="chips" role="radiogroup" aria-label="Status">
+        <template x-for="s in statuses" :key="s[0]">
+          <button type="button" class="chip" role="radio" :aria-checked="(status === s[0]).toString()" :class="{ 'is-on': status === s[0] }" @click="status = s[0]" x-text="s[1]"></button>
+        </template>
+      </div>
+      <span class="spacer" style="flex:1"></span>
+      <button type="button" class="btn btn-primary" @click="generate()" :disabled="generating || isFuture">
+        <span x-text="generating ? 'Preparing…' : 'Prepare ' + monthName(month) + ' salary'"></span>
+      </button>
+    </div>
+  </section>
+
+  <div class="sumbar sb-3" aria-live="polite" x-show="summary">
+    <div><span x-text="'Salary for ' + monthName(month)"></span><b x-text="taka(summary && summary.total_net)"></b></div>
+    <div><span>Paid <small x-text="summary ? '(' + summary.paid_count + ')' : ''"></small></span><b class="txt-ok" x-text="taka(summary && summary.paid)"></b></div>
+    <div><span>Still to pay <small x-text="summary ? '(' + summary.unpaid_count + ')' : ''"></small></span><b class="txt-due" x-text="taka(summary && summary.unpaid)"></b></div>
+  </div>
+
+  <section class="panel">
+    <template x-if="error">
+      <div class="empty">
+        <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2>Couldn't load salary slips</h2><p x-text="error"></p>
+        <button class="btn btn-ghost" @click="fetch()">Try again</button>
+      </div>
+    </template>
+    <template x-if="!error">
+      <div>
+        <table class="dt" :class="{ 'is-loading': loading }">
+          <thead><tr><th>Staff</th><th class="num">Basic</th><th class="num hide-md">Additions</th><th class="num hide-md">Deductions</th><th class="num">Net salary</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            <template x-for="r in rows" :key="r.id">
+              <tr>
+                <td data-k="Staff"><b x-text="r.staff_name"></b><span class="sub" x-text="r.designation || r.employee_id || ''"></span></td>
+                <td class="num" data-k="Basic" x-text="taka(r.basic)"></td>
+                <td class="num hide-md" data-k="Additions" x-text="taka(n(r.commission) + n(r.bonus) + n(r.other_addition))"></td>
+                <td class="num hide-md" data-k="Deductions"><span :class="deduct(r) > 0 ? 'txt-due' : ''" x-text="taka(deduct(r))"></span></td>
+                <td class="num" data-k="Net salary"><b x-text="taka(r.net)"></b></td>
+                <td data-k="Status"><span class="tag" :class="r.status === 'paid' ? 'tg-completed' : 'tg-pending'" x-text="r.status === 'paid' ? 'Paid ' + fmtDate(r.paid_date) : 'Unpaid'"></span></td>
+                <td class="row-acts">
+                  <template x-if="r.status === 'unpaid'">
+                    <span>
+                      <button type="button" class="btn btn-sm btn-primary" @click="openPay(r)">Pay</button>
+                      <button type="button" class="btn btn-sm btn-ghost" @click="openEdit(r)">Edit</button>
+                      <button type="button" class="icon-btn" @click="ask('delete', r)" aria-label="Delete slip">{% icon "trash" 17 %}</button>
+                    </span>
+                  </template>
+                  <template x-if="r.status === 'paid'">
+                    <span>
+                      <button type="button" class="btn btn-sm btn-ghost" @click="showSlip(r)">Payslip</button>
+                      <button type="button" class="btn btn-sm btn-ghost" @click="ask('unpay', r)">Cancel payment</button>
+                    </span>
+                  </template>
+                </td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !rows.length ? 5 : 0)" :key="'sk' + i">
+              <tr class="sk-row"><td colspan="7"><span class="sk-line"></span></td></tr>
+            </template>
+          </tbody>
+        </table>
+        <template x-if="!loading && !rows.length">
+          <div class="empty">
+            <div class="tile">{% icon "users" 26 %}</div>
+            <h2 x-text="status ? 'No ' + status + ' slips this month' : 'No salary slips for ' + monthName(month) + ' yet'"></h2>
+            <p>Press “Prepare salary” to make a slip for everyone with a salary set in Staff.</p>
+          </div>
+        </template>
+        <nav class="pager" x-show="meta.count > 0" aria-label="Pages">
+          <span class="pager-info" x-text="`Showing ${from}–${to} of ${meta.count}`"></span>
+          <div class="pager-btns" x-show="meta.total_pages > 1">
+            <button type="button" class="icon-btn" :disabled="page <= 1" @click="go(page - 1)" aria-label="Previous page">{% icon "chevron-left" 18 %}</button>
+            <button type="button" class="icon-btn" :disabled="page >= meta.total_pages" @click="go(page + 1)" aria-label="Next page">{% icon "chevron-right" 18 %}</button>
+          </div>
+        </nav>
+      </div>
+    </template>
+  </section>
+
+  {# Edit slip #}
+  <div class="modal-wrap" x-show="editOpen" x-cloak x-transition.opacity.duration.120ms @click.self="editOpen = false" role="dialog" aria-modal="true" aria-label="Edit salary slip">
+    <div class="modal" x-show="editOpen" style="max-width:520px">
+      <template x-if="edit">
+        <form @submit.prevent="saveEdit()" novalidate>
+          <h2 x-text="edit.name + ' — ' + monthName(edit.month)"></h2>
+          <div class="fld-row">
+            <div class="fld"><label class="fld-label">Basic salary</label><div class="money-in"><span>৳</span><input type="text" inputmode="decimal" x-model="edit.basic"></div></div>
+            <div class="fld"><label class="fld-label">Commission</label><div class="money-in"><span>৳</span><input type="text" inputmode="decimal" x-model="edit.commission"></div></div>
+          </div>
+          <div class="fld-row">
+            <div class="fld"><label class="fld-label">Bonus</label><div class="money-in"><span>৳</span><input type="text" inputmode="decimal" x-model="edit.bonus"></div></div>
+            <div class="fld"><label class="fld-label">Other addition</label><div class="money-in"><span>৳</span><input type="text" inputmode="decimal" x-model="edit.other_addition"></div></div>
+          </div>
+          <div class="fld-row">
+            <div class="fld"><label class="fld-label">Advance to cut</label><div class="money-in"><span>৳</span><input type="text" inputmode="decimal" x-model="edit.advance_deduction"></div>
+              <p class="fld-hint">Advance still owed: <b x-text="taka(edit.open)"></b></p></div>
+            <div class="fld"><label class="fld-label">Other deduction</label><div class="money-in"><span>৳</span><input type="text" inputmode="decimal" x-model="edit.other_deduction"></div>
+              <p class="fld-hint">e.g. absence, fine</p></div>
+          </div>
+          <div class="fld"><label class="fld-label">Note</label><input class="in" type="text" maxlength="255" x-model="edit.note"></div>
+          <p class="mr-done-amt" style="text-align:left">Net salary <b x-text="taka(editNet)"></b></p>
+          <p class="modal-err" x-show="editErr" x-text="editErr"></p>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" @click="editOpen = false" :disabled="working">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="working"><span x-text="working ? 'Saving…' : 'Save slip'"></span></button>
+          </div>
+        </form>
+      </template>
+    </div>
+  </div>
+
+  {# Pay #}
+  <div class="modal-wrap" x-show="payOpen" x-cloak x-transition.opacity.duration.120ms @click.self="payOpen = false" role="dialog" aria-modal="true" aria-label="Pay salary">
+    <div class="modal" x-show="payOpen" style="max-width:480px">
+      <template x-if="pay">
+        <form @submit.prevent="savePay()" novalidate>
+          <h2>Pay salary — <span x-text="pay.name"></span></h2>
+          <p class="mr-done-amt" style="text-align:left"><b x-text="taka(pay.net)"></b></p>
+          <div class="fld">
+            <label class="fld-label">Pay from account <i>*</i></label>
+            {% include "web/_combo.html" with model="pay.account" source="accounts" placeholder="Choose account" icon="wallet" noclear=1 %}
+            <p class="tr-bal" :class="{ 'is-short': payShort }" x-show="accBalance(pay.account) !== null">Balance <b x-text="taka(accBalance(pay.account))"></b></p>
+          </div>
+          <div class="fld-row">
+            <div class="fld"><label class="fld-label">Method</label>
+              <select class="in" x-model="pay.method"><template x-for="m in methods" :key="m[0]"><option :value="m[0]" x-text="m[1]"></option></template></select></div>
+            <div class="fld"><label class="fld-label">Date</label><input class="in" type="date" x-model="pay.date"></div>
+          </div>
+          <p class="modal-err" x-show="payErr" x-text="payErr"></p>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" @click="payOpen = false" :disabled="working">Cancel</button>
+            <button type="submit" class="btn btn-primary" :disabled="working"><span x-text="working ? 'Paying…' : 'Pay ' + taka(pay.net)"></span></button>
+          </div>
+        </form>
+      </template>
+    </div>
+  </div>
+
+  {# Confirm #}
+  <div class="modal-wrap" x-show="confirm" x-cloak x-transition.opacity.duration.120ms @click.self="confirm = null" role="dialog" aria-modal="true" aria-labelledby="pr-confirm-title">
+    <div class="modal" x-show="confirm">
+      <h2 id="pr-confirm-title" x-text="confirmText && confirmText.title"></h2>
+      <p x-text="confirmText && confirmText.body"></p>
+      <p class="modal-err" x-show="confirmErr" x-text="confirmErr"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="confirm = null" :disabled="working">Keep it</button>
+        <button type="button" class="btn btn-danger" @click="runConfirm()" :disabled="working"><span x-text="working ? 'Please wait…' : (confirmText && confirmText.btn)"></span></button>
+      </div>
+    </div>
+  </div>
+
+  {# Payslip #}
+  <div class="modal-wrap" x-show="slipOpen" x-cloak x-transition.opacity.duration.120ms @click.self="slipOpen = false" role="dialog" aria-modal="true" aria-label="Payslip">
+    <div class="modal" x-show="slipOpen" style="max-width:560px">
+      <template x-if="slip">
+        <div>
+          <div class="print-area">
+            <div class="rp-head" style="display:block">
+              <h2>{{ web_company.name }}</h2>
+              <p><b>Payslip</b> · <span x-text="monthName(slip.month)"></span></p>
+            </div>
+            <div class="rp-stmt" style="max-width:none">
+              <p><span>Employee</span><b x-text="slip.staff_name"></b></p>
+              <p x-show="slip.designation || slip.employee_id"><span>Designation / ID</span><span x-text="[slip.designation, slip.employee_id].filter(Boolean).join(' · ')"></span></p>
+              <h3 class="rp-sec">Earnings</h3>
+              <p class="is-sub"><span>Basic salary</span><span x-text="taka(slip.basic)"></span></p>
+              <p class="is-sub" x-show="n(slip.commission)"><span>Commission</span><span x-text="taka(slip.commission)"></span></p>
+              <p class="is-sub" x-show="n(slip.bonus)"><span>Bonus</span><span x-text="taka(slip.bonus)"></span></p>
+              <p class="is-sub" x-show="n(slip.other_addition)"><span>Other addition</span><span x-text="taka(slip.other_addition)"></span></p>
+              <p><span>Total earnings</span><b x-text="taka(gross(slip))"></b></p>
+              <h3 class="rp-sec" x-show="deduct(slip) > 0">Deductions</h3>
+              <p class="is-sub" x-show="n(slip.advance_deduction)"><span>Advance recovered</span><span x-text="taka(slip.advance_deduction)"></span></p>
+              <p class="is-sub" x-show="n(slip.other_deduction)"><span>Other deduction</span><span x-text="taka(slip.other_deduction)"></span></p>
+              <p class="is-total"><span>Net salary paid</span><b x-text="taka(slip.net)"></b></p>
+              <p class="is-sub"><span x-text="'Paid on ' + fmtDate(slip.paid_date) + ' · ' + (slip.payment_method || '') + (slip.account_name ? ' · ' + slip.account_name : '')"></span><span></span></p>
+            </div>
+          </div>
+          <div class="modal-actions no-print">
+            <button type="button" class="btn btn-ghost" @click="slipOpen = false">Close</button>
+            <button type="button" class="btn btn-primary" @click="printSlip()">{% icon "printer" 16 %} Print</button>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <div class="toast" x-show="toast" x-cloak x-transition.opacity role="status" x-text="toast"></div>
+</div>
+{% endblock %}

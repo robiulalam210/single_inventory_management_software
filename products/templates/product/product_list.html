@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>প্রোডাক্ট তালিকা</h2>
+<table border="1">
+  <tr>
+    <th>নাম</th>
+    <th>SKU</th>
+    <th>মূল্য</th>
+    <th>স্টক</th>
+    <th>ব্র্যান্ড</th>
+  </tr>
+  {% for product in products %}
+  <tr>
+    <td>{{ product.name }}</td>
+    <td>{{ product.sku }}</td>
+    <td>{{ product.selling_price }}</td>
+    <td>{{ product.stock_qty }}</td>
+    <td>{{ product.brand }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

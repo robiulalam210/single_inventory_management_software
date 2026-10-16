@@ -1,0 +1,168 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/suppliers.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  {% if form_init.canSeeList %}<a class="btn btn-ghost top-act" href="{% url 'web:supplier_payments' %}">{% icon "coins" 18 %}<span>All payments</span></a>{% endif %}
+{% endblock %}
+{% block content %}
+{{ form_init|json_script:"sp-init" }}
+<div x-data="supplierPayForm(JSON.parse(document.getElementById('sp-init').textContent))">
+
+  <template x-if="done">
+    <section class="panel mr-done">
+      <div class="mr-done-ic">{% icon "check" 28 %}</div>
+      <h2><span x-text="done.sp_no"></span> saved</h2>
+      <p class="mr-done-amt" x-text="taka(done.amount)"></p>
+      <p class="mr-done-sub">paid to <b x-text="done.supplier_name"></b>
+        <span x-show="cashOf(done) > 0">from <b x-text="done.account_name"></b></span></p>
+      <ul class="mr-done-lines" x-show="done.allocation_detail">
+        <template x-for="a in (done.allocation_detail ? done.allocation_detail.invoices : [])" :key="a.purchase_id">
+          <li><span x-text="a.invoice_no"></span><b x-text="taka(a.amount) + ' paid'"></b></li>
+        </template>
+        <li x-show="done.allocation_detail && done.allocation_detail.advance_added > 0"><span>Kept as advance with supplier</span><b x-text="done.allocation_detail && taka(done.allocation_detail.advance_added)"></b></li>
+        <li x-show="Number(done.advance_amount_used) > 0"><span>Taken from earlier advance</span><b x-text="taka(done.advance_amount_used)"></b></li>
+      </ul>
+      <div class="mr-done-actions">
+        <template x-if="canSeeList">
+          <a class="btn btn-ghost" :href="'{% url 'web:supplier_payments' %}?period=all&open=' + done.id">{% icon "printer" 18 %} View &amp; print</a>
+        </template>
+        <button type="button" class="btn btn-primary" @click="again()">{% icon "plus" 18 %} New payment</button>
+      </div>
+    </section>
+  </template>
+
+  <form x-show="!done" class="mr-grid" @submit.prevent="save()" novalidate
+        @keydown.enter="if ($event.target.tagName === 'INPUT') $event.preventDefault()">
+    <section class="panel mr-form">
+      <div class="fgroup">
+        <div class="fgroup-head"><span class="step">1</span><h3>Who are you paying</h3></div>
+        <div class="fld" :class="{ 'has-error': errors.supplier }">
+          <label class="fld-label">Supplier <i>*</i></label>
+          {% include "web/_combo.html" with model="form.supplier" source="suppliers" placeholder="Search supplier by name or phone" icon="store" %}
+          <p class="fld-err" x-show="errors.supplier" x-text="errors.supplier"></p>
+        </div>
+        <template x-if="supplier">
+          <div class="cust-card">
+            <div><span>You owe</span><b :class="{ 'txt-due': totalDue > 0 }" x-text="duesLoading ? '…' : taka(totalDue)"></b>
+              <small x-text="duesLoading ? '' : (dues.length + (dues.length === 1 ? ' invoice' : ' invoices'))"></small></div>
+            <div><span>Advance with them</span><b x-text="taka(supplier.advance_balance)"></b></div>
+            <div><span>Phone</span><b x-text="supplier.phone || '—'"></b></div>
+          </div>
+        </template>
+      </div>
+
+      <div class="fgroup" x-show="form.supplier" x-cloak>
+        <div class="fgroup-head"><span class="step">2</span><h3>Apply the payment to</h3></div>
+        <div class="choice choice-3" role="radiogroup">
+          <label class="choice-opt" :class="{ 'is-on': form.mode === 'overall' }">
+            <input type="radio" value="overall" x-model="form.mode">
+            <b>Oldest dues first</b><span>Clears the oldest bills first. Extra is kept as advance.</span>
+          </label>
+          <label class="choice-opt" :class="{ 'is-on': form.mode === 'specific', 'is-off': !dues.length }">
+            <input type="radio" value="specific" x-model="form.mode" :disabled="!dues.length">
+            <b>One invoice</b><span x-text="dues.length ? 'Pay a particular bill.' : 'Nothing is due to this supplier.'"></span>
+          </label>
+          <label class="choice-opt" :class="{ 'is-on': form.mode === 'advance' }">
+            <input type="radio" value="advance" x-model="form.mode">
+            <b>Advance</b><span>Pay ahead for a future delivery.</span>
+          </label>
+        </div>
+        <div class="fld" x-show="form.mode === 'specific'" x-cloak :class="{ 'has-error': errors.purchase }">
+          <label class="fld-label">Invoice <i>*</i></label>
+          {% include "web/_combo.html" with model="form.purchase" source="invoiceOptions" placeholder="Choose an unpaid invoice" icon="receipt" %}
+          <p class="fld-err" x-show="errors.purchase" x-text="errors.purchase"></p>
+        </div>
+      </div>
+
+      <div class="fgroup">
+        <div class="fgroup-head"><span class="step" x-text="form.supplier ? 3 : 2">3</span><h3>Amount and payment</h3></div>
+        <div class="fld-row">
+          <div class="fld" :class="{ 'has-error': errors.amount }">
+            <label class="fld-label" for="sp-amount">Amount <i>*</i></label>
+            <div class="money-in"><span>৳</span>
+              <input id="sp-amount" type="text" inputmode="decimal" autocomplete="off" placeholder="0.00" x-model="form.amount"
+                     @input="errors.amount = ''; form.amount = form.amount.replace(/[^0-9.,]/g, '')"></div>
+            <div class="quick" x-show="form.mode === 'overall' && totalDue > 0">
+              <button type="button" class="chip" @click="fill(totalDue)">All dues <span x-text="taka(totalDue)"></span></button>
+            </div>
+            <div class="quick" x-show="form.mode === 'specific' && selected">
+              <button type="button" class="chip" @click="fill(selected.due_amount)">Invoice due <span x-text="selected && taka(selected.due_amount)"></span></button>
+            </div>
+            <p class="fld-err" x-show="errors.amount" x-text="errors.amount"></p>
+            <p class="fld-hint" x-show="amountNum > 0 && !errors.amount" x-text="words(amountNum)"></p>
+          </div>
+          <div class="fld" :class="{ 'has-error': errors.date }">
+            <label class="fld-label" for="sp-date">Date <i>*</i></label>
+            <input id="sp-date" class="in" type="date" x-model="form.date" :max="maxDate" @change="errors.date = ''">
+            <p class="fld-err" x-show="errors.date" x-text="errors.date"></p>
+          </div>
+        </div>
+
+        <label class="switch" x-show="supplier && advAvail > 0 && form.mode !== 'advance'" x-cloak>
+          <input type="checkbox" x-model="form.useAdvance">
+          <span class="switch-ui" aria-hidden="true"></span>
+          <span><b>Use the advance you already gave</b>
+            <small x-text="'Up to ' + taka(advAvail) + ' of this payment comes from it, the rest from your account.'"></small></span>
+        </label>
+
+        <div class="fld" x-show="cashPart > 0 || !form.supplier">
+          <label class="fld-label">Payment method <i>*</i></label>
+          <div class="seg seg-fill" role="radiogroup" aria-label="Payment method">
+            <template x-for="m in methods" :key="m.value">
+              <button type="button" role="radio" :aria-checked="(form.method === m.value).toString()"
+                      :class="{ 'is-on': form.method === m.value }" @click="form.method = m.value; errors.account = ''" x-text="m.label"></button>
+            </template>
+          </div>
+        </div>
+        <div class="fld-row">
+          <div class="fld" :class="{ 'has-error': errors.account }">
+            <label class="fld-label">Pay from account <i>*</i></label>
+            {% include "web/_combo.html" with model="form.account" source="accounts" placeholder="Choose account" icon="wallet" noclear=1 %}
+            <p class="fld-err" x-show="errors.account" x-text="errors.account"></p>
+            <p class="fld-hint warn" x-show="!errors.account && shortBy > 0" x-cloak x-text="'Short by ' + taka(shortBy) + ' in this account.'"></p>
+          </div>
+          <div class="fld">
+            <label class="fld-label" for="sp-ref">Reference <small>(optional)</small></label>
+            <input id="sp-ref" class="in" type="text" maxlength="100" x-model="form.reference" placeholder="Cheque / transaction no.">
+          </div>
+        </div>
+        <div class="fld">
+          <label class="fld-label" for="sp-note">Note <small>(optional)</small></label>
+          <textarea id="sp-note" class="in" rows="2" x-model="form.note" placeholder="Anything to remember about this payment"></textarea>
+        </div>
+      </div>
+    </section>
+
+    <aside class="panel mr-side">
+      <h3>Payment preview</h3>
+      <div class="mr-side-amt">
+        <span>Paying</span>
+        <b x-text="taka(amountNum)"></b>
+        <small x-text="supplier ? 'to ' + supplier.name : 'Choose a supplier to begin'"></small>
+      </div>
+      <template x-if="supplier && amountNum > 0">
+        <div>
+          <h4>Where the money goes</h4>
+          <ul class="alloc">
+            <template x-for="l in plan.lines" :key="l.id">
+              <li><div><b x-text="l.invoice"></b><span x-text="l.clears ? 'Paid in full' : taka(round2(l.due - l.take)) + ' still due'"></span></div><b x-text="taka(l.take)"></b></li>
+            </template>
+            <li x-show="plan.advance > 0" class="alloc-adv">
+              <div><b>Advance</b><span>Kept with the supplier for later</span></div><b x-text="taka(plan.advance)"></b>
+            </li>
+          </ul>
+          <h4>Where the money comes from</h4>
+          <ul class="alloc">
+            <li x-show="advPart > 0"><div><b>Earlier advance</b><span x-text="taka(round2(advAvail - advPart)) + ' advance left after this'"></span></div><b x-text="taka(advPart)"></b></li>
+            <li x-show="cashPart > 0"><div><b x-text="account ? account.name : 'Account'"></b><span x-text="account ? 'Balance after: ' + taka(round2(Number(account.balance) - cashPart)) : ''"></span></div><b x-text="taka(cashPart)"></b></li>
+          </ul>
+        </div>
+      </template>
+      <p class="form-err" x-show="serverError" x-cloak role="alert">{% icon "alert" 16 %}<span x-text="serverError"></span></p>
+      <button type="submit" class="btn btn-primary btn-block" :disabled="saving">
+        <span x-text="saving ? 'Saving…' : (amountNum > 0 ? 'Pay ' + taka(amountNum) : 'Save payment')"></span>
+      </button>
+    </aside>
+  </form>
+</div>
+{% endblock %}

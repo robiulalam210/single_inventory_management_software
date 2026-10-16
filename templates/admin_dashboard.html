@@ -1,0 +1,11 @@
+{% extends "base_admin.html" %}
+{% block title %}Admin Dashboard – Inventory Management System{% endblock %}
+{% block dashboard_active %}active{% endblock %}
+{% block content %}
+    <h2>Welcome, {{ request.user.username }}<br>
+        <small>({{ business.name }})</small>
+    </h2>
+    <div class="actions">
+    
+    </div>
+{% endblock %}

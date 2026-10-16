@@ -1,0 +1,324 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}
+<script src="{% static 'web/vendor/jsbarcode-code128-3.11.6.min.js' %}"></script>
+<script src="{% static 'web/js/products.js' %}"></script>
+{% endblock %}
+{% block topbar_actions %}
+  {% if pr_perms.create %}<button type="button" class="btn btn-primary top-act" onclick="window.dispatchEvent(new CustomEvent('product-new'))">{% icon "plus" 18 %}<span>New product</span></button>{% endif %}
+{% endblock %}
+{% block content %}
+{{ pr_perms|json_script:"pr-perms" }}
+<div x-data="productList(JSON.parse(document.getElementById('pr-perms').textContent))"
+     @product-new.window="openForm(null)"
+     @keydown.escape.window="labelOpen ? (labelOpen = false) : (formOpen ? (formOpen = false) : (confirmDel ? (confirmDel = false) : shut()))">
+
+  <section class="panel filters">
+    <div class="f-row">
+      <label class="f-search">
+        {% icon "search" 18 %}
+        <input type="search" x-model="f.q" placeholder="Search name, SKU, category or brand" aria-label="Search products">
+      </label>
+      <div class="seg seg-sm" role="tablist" aria-label="Sort">
+        <template x-for="o in sorts" :key="o.key">
+          <button type="button" :class="{ 'is-on': f.sort === o.key }" @click="f.sort = o.key" x-text="o.label"></button>
+        </template>
+      </div>
+    </div>
+    <div class="f-row">
+      <div class="chips" role="radiogroup" aria-label="Stock">
+        <template x-for="c in views" :key="c.key">
+          <button type="button" class="chip" role="radio" :aria-checked="(f.view === c.key).toString()"
+                  :class="{ 'is-on': f.view === c.key }" @click="f.view = c.key">
+            <span x-text="c.label"></span><span class="chip-n" x-show="counts[c.key] != null" x-text="counts[c.key]"></span>
+          </button>
+        </template>
+      </div>
+      <div class="f-combos">
+        {% include "web/_combo.html" with model="f.category" source="categoryOptions" placeholder="All categories" icon="box" %}
+        <button type="button" class="btn-link" x-show="filtered" x-cloak @click="clearAll()">{% icon "filter-x" 16 %} Reset</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="sumbar" aria-live="polite">
+    <div><span>Active products</span><b x-text="counts.active != null ? num(counts.active) : '—'"></b></div>
+    <div><span>Running low</span><b :class="{ 'txt-warn': counts.low > 0 }" x-text="counts.low != null ? num(counts.low) : '—'"></b></div>
+    <div><span>Out of stock</span><b :class="{ 'txt-due': counts.out > 0 }" x-text="counts.out != null ? num(counts.out) : '—'"></b></div>
+    <div><span>Units in stock</span><b x-text="stockSum ? num(stockSum.total_stock_quantity) : '—'"></b></div>
+    <div class="sum-period"><span>Stock value</span><b x-text="stockSum ? taka(stockSum.total_stock_value) : '—'"></b>
+      <small class="sum-note" x-show="stockSum">at cost price</small></div>
+  </div>
+
+  <section class="panel">
+    <template x-if="error">
+      <div class="empty">
+        <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2>Couldn't load products</h2><p x-text="error"></p>
+        <button class="btn btn-ghost" @click="fetch()">Try again</button>
+      </div>
+    </template>
+    <template x-if="!error">
+      <div>
+        <table class="dt" :class="{ 'is-loading': loading }">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th class="hide-md">Category</th>
+              <th class="num hide-md">Cost</th>
+              <th class="num">Price</th>
+              <th class="num">In stock</th>
+              <th class="c">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in rows" :key="r.id">
+              <tr tabindex="0" @click="open(r)" @keydown.enter="open(r)" :aria-label="'Open ' + r.name" :class="{ 'is-void': !r.is_active }">
+                <td data-k="Invoice">
+                  <div class="pcell">
+                    <span class="pthumb" :style="r.image ? '' : '--h:' + hue(r)">
+                      <template x-if="r.image"><img :src="r.image" alt="" loading="lazy"></template>
+                      <template x-if="!r.image"><span x-text="r.name.slice(0, 1).toUpperCase()"></span></template>
+                    </span>
+                    <div><b x-text="r.name"></b><span class="sub" x-text="r.sku"></span></div>
+                  </div>
+                </td>
+                <td class="hide-md" data-k="Category" x-text="(r.category_info && r.category_info.name) || '—'"></td>
+                <td class="num hide-md" data-k="Cost" x-text="taka(r.purchase_price)"></td>
+                <td class="num" data-k="Total">
+                  <b x-text="taka(r.selling_price)"></b>
+                  <span class="sub txt-ok" x-show="r.discount_applied" x-text="'Sale ' + taka(r.final_price)"></span>
+                </td>
+                <td class="num" data-k="Due">
+                  <b :class="stockCls(r)" x-text="num(r.stock_qty) + ' ' + unitOf(r)"></b>
+                  <span class="sub" x-show="Number(r.stock_qty) > 0 && Number(r.stock_qty) <= Number(r.alert_quantity)" x-text="'Alert at ' + num(r.alert_quantity)"></span>
+                </td>
+                <td class="c" data-k="Status"><span class="pill" :class="badge(r).cls" x-text="badge(r).label"></span></td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !rows.length ? 6 : 0)" :key="'sk' + i">
+              <tr class="sk-row"><td colspan="6"><span class="sk-line"></span></td></tr>
+            </template>
+          </tbody>
+        </table>
+        <template x-if="!loading && !rows.length">
+          <div class="empty">
+            <div class="tile">{% icon "box" 26 %}</div>
+            <h2 x-text="filtered ? 'No products match' : 'No products yet'"></h2>
+            <p x-text="filtered ? 'Try another search or clear the filters.' : 'Add the items you sell. They show up in Sale, POS and Purchase straight away.'"></p>
+            <button class="btn btn-ghost" x-show="filtered" @click="clearAll()">Reset filters</button>
+            <template x-if="!filtered && perms.create"><button class="btn btn-primary" @click="openForm(null)">{% icon "plus" 18 %} New product</button></template>
+          </div>
+        </template>
+        <nav class="pager" x-show="meta.count > 0" aria-label="Pages">
+          <span class="pager-info" x-text="`Showing ${meta.from}–${meta.to} of ${num(meta.count)}`"></span>
+          <div class="pager-btns" x-show="meta.total_pages > 1">
+            <button type="button" class="icon-btn" :disabled="page <= 1" @click="go(page - 1)" aria-label="Previous page">{% icon "chevron-left" 18 %}</button>
+            <template x-for="(p, i) in pages" :key="i + '-' + p">
+              <button type="button" class="pg" :class="{ 'is-on': p === page }" :disabled="p === '…'" @click="go(p)" x-text="p"></button>
+            </template>
+            <button type="button" class="icon-btn" :disabled="page >= meta.total_pages" @click="go(page + 1)" aria-label="Next page">{% icon "chevron-right" 18 %}</button>
+          </div>
+        </nav>
+      </div>
+    </template>
+  </section>
+
+  {# ───────────── product drawer ───────────── #}
+  <div class="drawer-wrap" x-show="sel" x-cloak x-transition.opacity.duration.150ms @click.self="shut()">
+    <aside class="drawer" role="dialog" aria-modal="true" aria-label="Product" x-show="sel"
+           x-transition:enter="drawer-in" x-transition:enter-start="drawer-from" x-transition:enter-end="drawer-to">
+      <template x-if="sel">
+        <div class="drawer-body">
+          <header class="drawer-head">
+            <div><h2 x-text="sel.name"></h2><span class="pill" :class="badge(sel).cls" x-text="badge(sel).label"></span></div>
+            <div class="drawer-actions">
+              <template x-if="perms.delete"><button type="button" class="icon-btn danger" @click="askDelete()" aria-label="Delete product" title="Delete">{% icon "trash" 18 %}</button></template>
+              <template x-if="perms.edit"><button type="button" class="btn btn-ghost" @click="openForm(sel)">{% icon "settings" 17 %} <span>Edit</span></button></template>
+              <button type="button" class="icon-btn" @click="shut()" aria-label="Close">{% icon "x" 18 %}</button>
+            </div>
+          </header>
+          <div class="sp-body">
+            <div class="pd-hero">
+              <span class="pd-img" :style="sel.image ? '' : '--h:' + hue(sel)">
+                <template x-if="sel.image"><img :src="sel.image" alt=""></template>
+                <template x-if="!sel.image"><span x-text="sel.name.slice(0, 1).toUpperCase()"></span></template>
+              </span>
+              <div class="pd-meta">
+                <p><span>SKU</span><b x-text="sel.sku"></b></p>
+                <p><span>Category</span><b x-text="(sel.category_info && sel.category_info.name) || '—'"></b></p>
+                <p><span>Unit</span><b x-text="(sel.unit_info && sel.unit_info.name) || '—'"></b></p>
+                <p x-show="sel.brand_info"><span>Brand</span><b x-text="sel.brand_info && sel.brand_info.name"></b></p>
+              </div>
+            </div>
+
+            <div class="sp-stats">
+              <div><span>Cost</span><b x-text="taka(sel.purchase_price)"></b></div>
+              <div><span>Selling price</span><b x-text="taka(sel.selling_price)"></b>
+                <small class="txt-ok" x-show="sel.discount_applied" x-text="'Now ' + taka(sel.final_price)"></small></div>
+              <div><span>Profit / unit</span><b :class="margin(sel).amount < 0 ? 'txt-due' : 'txt-ok'" x-text="taka(margin(sel).amount)"></b>
+                <small x-text="margin(sel).pct + '% margin'"></small></div>
+              <div class="is-due" :class="{ 'is-zero': stockState(sel) === 'in', 'is-warn': stockState(sel) === 'low' }">
+                <span>In stock</span><b x-text="num(sel.stock_qty) + ' ' + unitOf(sel)"></b><small x-text="'Alert at ' + num(sel.alert_quantity)"></small></div>
+            </div>
+
+            <div class="pd-note" x-show="sel.discount_applied">
+              {% icon "sparkle" 16 %}<span x-text="'Discount on: ' + (sel.discount_type === 'percentage' ? Number(sel.discount_value) + '% off' : taka(sel.discount_value) + ' off') + '. It is applied automatically in Sale and POS.'"></span>
+            </div>
+            <p class="pd-desc" x-show="sel.description" x-text="sel.description"></p>
+
+            <div class="sp-actions">
+              <button type="button" class="btn btn-ghost" @click="openLabels(sel)">{% icon "printer" 18 %} Print barcode labels</button>
+              <template x-if="perms.buy && sel.is_active"><a class="btn btn-ghost" href="{% url 'web:purchase_new' %}">{% icon "truck" 18 %} Buy more</a></template>
+            </div>
+            <div class="pd-barcode"><svg x-ref="barcode"></svg></div>
+            <p class="pd-help">Stock changes only through purchases, sales and returns, so the numbers always match your invoices.</p>
+          </div>
+        </div>
+      </template>
+    </aside>
+  </div>
+
+  {# ───────────── add / edit ───────────── #}
+  <div class="modal-wrap" x-show="formOpen" x-cloak x-transition.opacity.duration.120ms @click.self="formOpen = false" role="dialog" aria-modal="true" aria-labelledby="pf-title">
+    <form class="modal modal-wide" @submit.prevent="saveForm()" novalidate>
+      <h2 id="pf-title" x-text="form.id ? 'Edit product' : 'New product'"></h2>
+      <p class="modal-sub" x-text="form.id ? form.sku : 'The SKU (barcode) is created automatically.'"></p>
+
+      <div class="pf-top">
+        <label class="pf-img" :class="{ 'has-img': form.preview }" title="Add a photo">
+          <input type="file" accept="image/*" @change="pickImage($event)">
+          <template x-if="form.preview"><img :src="form.preview" alt=""></template>
+          <template x-if="!form.preview"><span>{% icon "plus" 20 %}<small>Photo</small></span></template>
+        </label>
+        <div class="fld" :class="{ 'has-error': fe.name }" style="flex:1">
+          <label class="fld-label" for="pf-name">Product name <i>*</i></label>
+          <input id="pf-name" x-ref="pfName" class="in" type="text" maxlength="255" x-model="form.name" @input="fe.name = ''" placeholder="e.g. Rice Miniket 1kg">
+          <p class="fld-err" x-show="fe.name" x-text="fe.name"></p>
+        </div>
+      </div>
+
+      <div class="fld-row">
+        <div class="fld">
+          <label class="fld-label">Category</label>
+          {% include "web/_combo.html" with model="form.category" source="categoryOptions" placeholder="Choose category" icon="box" %}
+          <button type="button" class="btn-link sm" @click="quickAdd('category')">{% icon "plus" 14 %} New category</button>
+        </div>
+        <div class="fld" :class="{ 'has-error': fe.unit }">
+          <label class="fld-label">Unit <i>*</i></label>
+          {% include "web/_combo.html" with model="form.unit" source="unitOptions" placeholder="pcs, kg, litre…" icon="box" %}
+          <p class="fld-err" x-show="fe.unit" x-text="fe.unit"></p>
+        </div>
+      </div>
+      <div class="fld">
+        <label class="fld-label">Brand</label>
+        {% include "web/_combo.html" with model="form.brand" source="brandOptions" placeholder="No brand" icon="sparkle" %}
+        <button type="button" class="btn-link sm" @click="quickAdd('brand')">{% icon "plus" 14 %} New brand</button>
+      </div>
+
+      <div class="fld-row">
+        <div class="fld" :class="{ 'has-error': fe.cost }">
+          <label class="fld-label" for="pf-cost">Cost price</label>
+          <div class="money-in sm"><span>৳</span><input id="pf-cost" type="text" inputmode="decimal" x-model="form.purchase_price" @input="fe.cost = ''; fe.price = ''; form.purchase_price = form.purchase_price.replace(/[^0-9.]/g, '')" placeholder="0.00"></div>
+          <p class="fld-err" x-show="fe.cost" x-text="fe.cost"></p>
+        </div>
+        <div class="fld" :class="{ 'has-error': fe.price }">
+          <label class="fld-label" for="pf-price">Selling price <i>*</i></label>
+          <div class="money-in sm"><span>৳</span><input id="pf-price" type="text" inputmode="decimal" x-model="form.selling_price" @input="fe.price = ''; form.selling_price = form.selling_price.replace(/[^0-9.]/g, '')" placeholder="0.00"></div>
+          <p class="fld-err" x-show="fe.price" x-text="fe.price"></p>
+          <p class="fld-hint" x-show="!fe.price && Number(form.selling_price) > 0 && Number(form.purchase_price) > 0"
+             x-text="'Profit ' + taka(Number(form.selling_price) - Number(form.purchase_price)) + ' per unit (' + formMargin + '%)'"></p>
+        </div>
+      </div>
+      <div class="fld-row">
+        <div class="fld" x-show="!form.id">
+          <label class="fld-label" for="pf-open">Opening stock</label>
+          <input id="pf-open" class="in" type="text" inputmode="numeric" x-model="form.opening_stock" @input="form.opening_stock = form.opening_stock.replace(/[^0-9]/g, '')" placeholder="0">
+          <p class="fld-hint">What you already have on the shelf today.</p>
+        </div>
+        <div class="fld">
+          <label class="fld-label" for="pf-alert">Alert me when stock reaches</label>
+          <input id="pf-alert" class="in" type="text" inputmode="numeric" x-model="form.alert_quantity" @input="form.alert_quantity = form.alert_quantity.replace(/[^0-9]/g, '')" placeholder="5">
+        </div>
+      </div>
+
+      <label class="switch">
+        <input type="checkbox" x-model="form.discount_on">
+        <span class="switch-ui" aria-hidden="true"></span>
+        <span><b>Put this product on discount</b><small>Applied automatically when you add it in Sale or POS.</small></span>
+      </label>
+      <div class="fld-row" x-show="form.discount_on" x-cloak>
+        <div class="fld" :class="{ 'has-error': fe.discount }">
+          <label class="fld-label">Discount</label>
+          <div class="in-unit">
+            <input class="in num" type="text" inputmode="decimal" x-model="form.discount_value" @input="fe.discount = ''; form.discount_value = form.discount_value.replace(/[^0-9.]/g, '')" placeholder="0">
+            <button type="button" class="unit-tg" @click="form.discount_type = form.discount_type === 'fixed' ? 'percentage' : 'fixed'" x-text="form.discount_type === 'fixed' ? '৳' : '%'"></button>
+          </div>
+          <p class="fld-err" x-show="fe.discount" x-text="fe.discount"></p>
+        </div>
+        <div class="fld"><label class="fld-label">Customers pay</label><div class="in in-static"><b x-text="taka(formFinal)"></b></div></div>
+      </div>
+
+      <div class="fld">
+        <label class="fld-label" for="pf-desc">Description <small>(optional)</small></label>
+        <textarea id="pf-desc" class="in" rows="2" x-model="form.description"></textarea>
+      </div>
+      <label class="switch" x-show="form.id">
+        <input type="checkbox" x-model="form.is_active">
+        <span class="switch-ui" aria-hidden="true"></span>
+        <span><b>Active</b><small x-text="form.is_active ? 'Can be sold and bought.' : 'Hidden from Sale, POS and Purchase. History is kept.'"></small></span>
+      </label>
+      <p class="modal-err" x-show="formError" x-text="formError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="formOpen = false" :disabled="formSaving">Cancel</button>
+        <button type="submit" class="btn btn-primary" :disabled="formSaving" x-text="formSaving ? 'Saving…' : (form.id ? 'Save changes' : 'Add product')"></button>
+      </div>
+    </form>
+  </div>
+
+  {# ───────────── quick add category / brand ───────────── #}
+  <div class="modal-wrap modal-top" x-show="qa.open" x-cloak @click.self="qa.open = false" role="dialog" aria-modal="true">
+    <form class="modal" @submit.prevent="saveQuickAdd()">
+      <h2 x-text="qa.kind === 'brand' ? 'New brand' : 'New category'"></h2>
+      <div class="fld"><input x-ref="qaName" class="in" type="text" maxlength="120" x-model="qa.name" :placeholder="qa.kind === 'brand' ? 'Brand name' : 'Category name'"></div>
+      <p class="modal-err" x-show="qa.error" x-text="qa.error"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="qa.open = false">Cancel</button>
+        <button type="submit" class="btn btn-primary" :disabled="qa.saving || !qa.name.trim()">Add</button>
+      </div>
+    </form>
+  </div>
+
+  {# ───────────── barcode labels ───────────── #}
+  <div class="modal-wrap" x-show="labelOpen" x-cloak @click.self="labelOpen = false" role="dialog" aria-modal="true" aria-labelledby="lb-title">
+    <div class="modal modal-wide">
+      <h2 id="lb-title" class="no-print">Barcode labels</h2>
+      <div class="lb-bar no-print">
+        <label class="fld-label" for="lb-n">How many</label>
+        <input id="lb-n" class="in" type="number" min="1" max="200" x-model.number="label.count" @input="renderLabels()" style="width:90px">
+        <label class="check"><input type="checkbox" x-model="label.price" @change="renderLabels()"> Show price</label>
+      </div>
+      <div class="labels print-area" x-ref="labels"></div>
+      <div class="modal-actions no-print">
+        <button type="button" class="btn btn-ghost" @click="labelOpen = false">Close</button>
+        <button type="button" class="btn btn-primary" @click="print()">{% icon "printer" 18 %} Print</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-wrap" x-show="confirmDel" x-cloak x-transition.opacity.duration.120ms @click.self="confirmDel = false" role="dialog" aria-modal="true">
+    <div class="modal">
+      <div class="modal-icon">{% icon "trash" 22 %}</div>
+      <h2>Delete <span x-text="sel && sel.name"></span>?</h2>
+      <p>If this product was ever bought or sold, it is marked inactive instead, so old invoices stay correct. Otherwise it is removed completely.</p>
+      <p class="modal-err" x-show="delError" x-text="delError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="confirmDel = false" :disabled="deleting">Keep</button>
+        <button type="button" class="btn btn-danger" @click="remove()" :disabled="deleting" x-text="deleting ? 'Working…' : 'Delete'"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" x-show="toast" x-cloak x-transition.opacity role="status" x-text="toast"></div>
+</div>
+{% endblock %}

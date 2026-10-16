@@ -1,0 +1,152 @@
+{% load static web_tags %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>{% block title %}{{ page_title|default:"Meherin Mart" }}{% endblock %} — {{ web_company.name }}</title>
+  <link rel="preload" href="{% static 'web/fonts/ibm-plex-sans-latin-400-normal.woff2' %}" as="font" type="font/woff2" crossorigin>
+  <link rel="icon" href="{% static 'web/img/favicon.svg' %}" type="image/svg+xml">
+  <link rel="stylesheet" href="{% static 'web/css/app.css' %}">
+  <script src="{% static 'web/js/app.js' %}"></script>
+  {% if web_low_stock %}<script src="{% static 'web/js/low_stock.js' %}"></script>{% endif %}
+  <script defer src="{% static 'web/vendor/alpine-3.14.9.min.js' %}"></script>
+  {% block head %}{% endblock %}
+</head>
+<body x-data="{ nav: false, signOut: false }" @keydown.escape.window="nav = false; signOut = false">
+<div class="shell">
+
+  {# ───────────── sidebar ───────────── #}
+  <aside class="sidebar" :class="{ 'is-open': nav }" aria-label="Main menu">
+    <div class="sb-head">
+      <span class="brand-logo">
+        {% if web_company.logo %}<img src="{{ web_company.logo }}" alt="">{% else %}{{ web_company.name|slice:":1"|upper }}{% endif %}
+      </span>
+      <div class="sb-company">
+        <b title="{{ web_company.name }}">{{ web_company.name }}</b>
+        <span>Meherin Mart</span>
+      </div>
+    </div>
+
+    <nav class="sb-nav">
+      {% for section in web_menu %}
+        {% if section.items|length == 1 %}
+          {% with item=section.items.0 %}
+          <div class="sb-section">
+            <a class="sb-link{% if item.active %} is-active{% endif %}" href="{{ item.href }}"
+               {% if item.active %}aria-current="page"{% endif %}>
+              {% icon section.icon 19 %}
+              <span>{{ item.title }}</span>
+              {% if not item.ready %}<span class="soon">Soon</span>{% endif %}
+            </a>
+          </div>
+          {% endwith %}
+        {% else %}
+          <div class="sb-section" x-data="{ open: {{ section.open|yesno:'true,false' }} }">
+            <button type="button" class="sb-toggle{% if section.open %} has-active{% endif %}"
+                    @click="open = !open" :aria-expanded="open.toString()" aria-expanded="{{ section.open|yesno:'true,false' }}">
+              {% icon section.icon 19 %}
+              <span>{{ section.title }}</span>
+              {% icon "chevron-down" 16 "chev" %}
+            </button>
+            <div class="sb-items" x-show="open" {% if not section.open %}x-cloak{% endif %}>
+              {% for item in section.items %}
+                <a class="sb-link{% if item.active %} is-active{% endif %}" href="{{ item.href }}"
+                   {% if item.active %}aria-current="page"{% endif %}>
+                  <span>{{ item.title }}</span>
+                  {% if not item.ready %}<span class="soon">Soon</span>{% endif %}
+                </a>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
+      {% empty %}
+        <p style="padding: 12px; color: var(--muted); font-size: 13px;">
+          Your account has no modules yet. Ask your admin to give you permissions.
+        </p>
+      {% endfor %}
+    </nav>
+  </aside>
+  <div class="scrim" x-show="nav" x-cloak @click="nav = false"></div>
+
+  {# ───────────── main ───────────── #}
+  <div class="main">
+    <header class="topbar">
+      <button type="button" class="icon-btn menu-btn" @click="nav = true" aria-label="Open menu">{% icon "menu" 20 %}</button>
+      <h1>{% block heading %}{{ page_title }}{% endblock %}</h1>
+      <div class="spacer"></div>
+      {% block topbar_actions %}{% endblock %}
+
+      <div class="dropdown" x-data="{ open: false }" @click.outside="open = false">
+        <button type="button" class="user-btn" @click="open = !open" :aria-expanded="open.toString()" aria-haspopup="menu">
+          <span class="avatar">
+            {% if web_user.picture %}<img src="{{ web_user.picture }}" alt="">{% else %}{{ web_user.initials }}{% endif %}
+          </span>
+          <span class="who"><b>{{ web_user.name }}</b><span>{{ web_user.role }}</span></span>
+          {% icon "chevron-down" 16 %}
+        </button>
+        <div class="menu" role="menu" x-show="open" x-cloak x-transition.opacity.duration.120ms>
+          <div class="menu-head">
+            <b>{{ web_user.name }}</b>
+            <span>{{ web_user.email|default:web_user.role }}</span>
+          </div>
+          <div x-data="{ t: App.theme.get() }">
+            <div class="theme-lbl">Appearance</div>
+            <div class="theme-seg" role="group" aria-label="Appearance">
+              <button type="button" :aria-pressed="(t === 'light').toString()" @click="t = 'light'; App.theme.set('light')">Light</button>
+              <button type="button" :aria-pressed="(t === 'dark').toString()" @click="t = 'dark'; App.theme.set('dark')">Dark</button>
+              <button type="button" :aria-pressed="(t === 'system').toString()" @click="t = 'system'; App.theme.set('system')">Auto</button>
+            </div>
+          </div>
+          <a class="menu-item" role="menuitem" href="{% url 'web:soon' 'profile' %}">{% icon "user" 18 %} My profile <span class="soon">Soon</span></a>
+          <a class="menu-item" role="menuitem" href="{% url 'web:soon' 'profile' %}">{% icon "key" 18 %} Change password <span class="soon">Soon</span></a>
+          <button type="button" class="menu-item danger" role="menuitem" @click="open = false; signOut = true">
+            {% icon "logout" 18 %} Sign out
+          </button>
+        </div>
+      </div>
+    </header>
+
+    {% if web_expiry %}
+      <div class="banner{% if web_expiry.expired %} is-expired{% endif %}" role="status">
+        {% icon "alert" 18 %}
+        {% if web_expiry.expired %}
+          Your subscription has expired. Contact Meherin Mart to renew and keep your data safe.
+        {% elif web_expiry.days == 0 %}
+          Your subscription ends today. Contact Meherin Mart to renew.
+        {% else %}
+          Your subscription ends in {{ web_expiry.days }} day{{ web_expiry.days|pluralize }}. Contact Meherin Mart to renew.
+        {% endif %}
+      </div>
+    {% endif %}
+
+    <main class="content{% if pos_page %} content-pos{% endif %}" id="content">
+      {% for message in messages %}
+        <div class="notice notice-ok" role="status">{% icon "check-circle" 18 %}<span>{{ message }}</span></div>
+      {% endfor %}
+      {% if web_guide %}{% include "web/_guide.html" with g=web_guide %}{% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+
+{# ───────────── sign out confirm ───────────── #}
+<div class="modal-wrap" x-show="signOut" x-cloak x-transition.opacity.duration.120ms @click.self="signOut = false"
+     role="dialog" aria-modal="true" aria-labelledby="so-title">
+  <div class="modal">
+    <div class="modal-icon">{% icon "logout" 22 %}</div>
+    <h2 id="so-title">Sign out?</h2>
+    <p>You will need your password to sign in again on this browser.</p>
+    <form method="post" action="{% url 'web:logout' %}" class="modal-actions">
+      {% csrf_token %}
+      <button type="button" class="btn btn-ghost" @click="signOut = false">Stay signed in</button>
+      <button type="submit" class="btn btn-danger">Sign out</button>
+    </form>
+  </div>
+</div>
+
+{% if web_low_stock %}{% include "web/_low_stock_alert.html" %}{% endif %}
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

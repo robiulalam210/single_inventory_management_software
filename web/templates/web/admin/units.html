@@ -1,0 +1,173 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/units.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  {% if un_perms.create %}<button type="button" class="btn btn-primary top-act" onclick="window.dispatchEvent(new CustomEvent('unit-new'))">{% icon "plus" 18 %}<span>New unit</span></button>{% endif %}
+{% endblock %}
+{% block content %}
+{{ un_perms|json_script:"un-perms" }}
+<div x-data="unitList(JSON.parse(document.getElementById('un-perms').textContent))"
+     @unit-new.window="openForm(null)"
+     @keydown.escape.window="formOpen ? (formOpen = false) : (quickOpen ? (quickOpen = false) : (del = null))">
+
+  {# ───────────── first run: no units at all ───────────── #}
+  <template x-if="!loading && !error && !units.length">
+    <section class="panel un-start">
+      <div class="tile">{% icon "ruler" 28 %}</div>
+      <h2>Set up your units first</h2>
+      <p>A unit is how you count or measure what you sell — pieces, kilograms, litres. Every product needs one,
+        so you can't add products until at least one unit exists.</p>
+      <template x-if="perms.create">
+        <div class="un-start-act">
+          <button type="button" class="btn btn-primary" @click="openQuick()">{% icon "sparkle" 18 %} Add common units</button>
+          <button type="button" class="btn btn-ghost" @click="openForm(null)">Create my own</button>
+        </div>
+      </template>
+      <template x-if="!perms.create"><p class="fld-hint">Ask your admin to add units.</p></template>
+    </section>
+  </template>
+
+  <template x-if="error">
+    <section class="panel empty">
+      <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+      <h2>Couldn't load units</h2><p x-text="error"></p>
+      <button class="btn btn-ghost" @click="load()">Try again</button>
+    </section>
+  </template>
+
+  <template x-if="!error && (loading || units.length)">
+    <div>
+      <section class="panel filters">
+        <div class="f-row">
+          <label class="f-search">
+            {% icon "search" 18 %}
+            <input type="search" x-model="q" placeholder="Search name or short name" aria-label="Search units">
+          </label>
+          <div class="chips" role="radiogroup" aria-label="Show">
+            <template x-for="c in views" :key="c.key">
+              <button type="button" class="chip" role="radio" :aria-checked="(view === c.key).toString()"
+                      :class="{ 'is-on': view === c.key }" @click="view = c.key"><span x-text="c.label"></span><span class="chip-n" x-text="c.n"></span></button>
+            </template>
+          </div>
+          <template x-if="perms.create && quickMissing">
+            <button type="button" class="btn-link un-quick" @click="openQuick()">{% icon "sparkle" 16 %} Add common units</button>
+          </template>
+        </div>
+      </section>
+
+      <section class="panel">
+        <table class="dt un-table" :class="{ 'is-loading': loading }">
+          <thead>
+            <tr><th>Unit</th><th>Used by</th><th class="c">Status</th><th class="r"><span class="sr-only">Actions</span></th></tr>
+          </thead>
+          <tbody>
+            <template x-for="u in rows" :key="u.id">
+              <tr :class="{ 'is-void': u.is_active === false, 'is-click': perms.edit }" @click="openForm(u)" :tabindex="perms.edit ? 0 : -1" @keydown.enter="openForm(u)">
+                <td data-k="Unit">
+                  <span class="un-name"><b x-text="u.name"></b><code class="un-code" x-show="u.code" x-text="u.code"></code></span>
+                </td>
+                <td data-k="Used by"><span :class="inUse(u) ? '' : 'muted'" x-text="usage(u)"></span></td>
+                <td class="c" data-k="Status"><span class="pill" :class="u.is_active === false ? 'st-off' : 'st-paid'" x-text="u.is_active === false ? 'Inactive' : 'Active'"></span></td>
+                <td class="r un-acts" @click.stop>
+                  <template x-if="perms.edit">
+                    <button type="button" class="icon-btn sm" @click="openForm(u)" :aria-label="'Edit ' + u.name" title="Edit">{% icon "pencil" 16 %}</button>
+                  </template>
+                  <template x-if="perms.edit">
+                    <button type="button" class="icon-btn sm" @click="toggle(u)" :disabled="!!busy[u.id]"
+                            :aria-label="(u.is_active === false ? 'Activate ' : 'Deactivate ') + u.name"
+                            :title="u.is_active === false ? 'Activate' : 'Deactivate — hide from new products'">
+                      <span x-show="u.is_active !== false">{% icon "eye-dim" 16 %}</span><span x-show="u.is_active === false">{% icon "eye" 16 %}</span>
+                    </button>
+                  </template>
+                  <template x-if="perms.delete">
+                    <button type="button" class="icon-btn sm danger" @click="askDelete(u)" :aria-label="'Delete ' + u.name" title="Delete">{% icon "trash" 16 %}</button>
+                  </template>
+                </td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !units.length ? 5 : 0)" :key="'sk' + i">
+              <tr class="sk"><td><span class="sk-line" style="width:45%"></span></td><td><span class="sk-line" style="width:60%"></span></td><td></td><td></td></tr>
+            </template>
+            <tr x-show="!loading && units.length && !rows.length"><td colspan="4" class="rows-empty"
+                x-text="q ? 'No unit matches “' + q + '”.' : (view === 'inactive' ? 'No inactive units.' : 'No active units.')"></td></tr>
+          </tbody>
+        </table>
+      </section>
+      <p class="un-foot" x-show="!loading && counts.inactive" x-cloak>Inactive units stay on the products that already use them, but can't be picked for new products.</p>
+    </div>
+  </template>
+
+  {# ───────────── add / edit ───────────── #}
+  <div class="modal-wrap" x-show="formOpen" x-cloak x-transition.opacity.duration.120ms @click.self="formOpen = false" role="dialog" aria-modal="true" aria-labelledby="un-title">
+    <form class="modal" @submit.prevent="saveForm()" novalidate>
+      <h2 id="un-title" x-text="form.id ? 'Edit unit' : 'New unit'"></h2>
+      <p class="modal-sub">How you count or measure a product when you buy and sell it.</p>
+      <div class="fld" :class="{ 'has-error': fe.name }">
+        <label class="fld-label" for="un-name">Name <i>*</i></label>
+        <input id="un-name" x-ref="unName" class="in" type="text" maxlength="60" x-model="form.name" @input="fe.name = ''" placeholder="e.g. Kilogram" autocomplete="off">
+        <p class="fld-err" x-show="fe.name" x-text="fe.name"></p>
+      </div>
+      <div class="fld" :class="{ 'has-error': fe.code }">
+        <label class="fld-label" for="un-code">Short name</label>
+        <input id="un-code" class="in" type="text" maxlength="20" x-model="form.code" @input="fe.code = ''" placeholder="e.g. kg" autocomplete="off">
+        <p class="fld-err" x-show="fe.code" x-text="fe.code"></p>
+        <p class="fld-hint" x-show="!fe.code">Shown next to quantities on invoices: 2.5 <b x-text="(form.code || '').trim() || (form.name || '').trim() || 'kg'"></b>.</p>
+      </div>
+      <p class="fld-hint warn" x-show="form.id && form.used" x-cloak
+         x-text="form.used + (form.used === 1 ? ' product uses' : ' products use') + ' this unit — renaming changes it on all of them, old invoices included.'"></p>
+      <p class="modal-err" x-show="formError" x-text="formError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="formOpen = false" :disabled="formSaving">Cancel</button>
+        <button type="submit" class="btn btn-primary" :disabled="formSaving" x-text="formSaving ? 'Saving…' : (form.id ? 'Save changes' : 'Add unit')"></button>
+      </div>
+    </form>
+  </div>
+
+  {# ───────────── common units ───────────── #}
+  <div class="modal-wrap" x-show="quickOpen" x-cloak x-transition.opacity.duration.120ms @click.self="!quickSaving && (quickOpen = false)" role="dialog" aria-modal="true" aria-labelledby="uq-title">
+    <div class="modal modal-wide">
+      <h2 id="uq-title">Add common units</h2>
+      <p class="modal-sub">Tick the ones your shop uses. You can rename, add or hide units any time.</p>
+      <div class="uq-grid">
+        <template x-for="c in quick" :key="c.code">
+          <label class="uq-item" :class="{ 'is-on': c.pick, 'is-have': c.exists }">
+            <input type="checkbox" x-model="c.pick" :disabled="!!c.exists || quickSaving">
+            <span class="uq-box">{% icon "check" 14 %}</span>
+            <span class="uq-txt">
+              <b><span x-text="c.name"></span> <code class="un-code" x-text="c.code"></code></b>
+              <small x-text="c.exists ? 'Already added' + (norm(c.exists) !== norm(c.name) ? ' as “' + c.exists + '”' : '') : c.note"></small>
+            </span>
+          </label>
+        </template>
+      </div>
+      <p class="modal-err" x-show="quickError" x-text="quickError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="quickOpen = false" :disabled="quickSaving">Cancel</button>
+        <button type="button" class="btn btn-primary" @click="addQuick()" :disabled="quickSaving || !quickPicked.length"
+                x-text="quickSaving ? 'Adding…' : (quickPicked.length ? 'Add ' + quickPicked.length + (quickPicked.length === 1 ? ' unit' : ' units') : 'Pick at least one')"></button>
+      </div>
+    </div>
+  </div>
+
+  {# ───────────── delete ───────────── #}
+  <div class="modal-wrap" x-show="del" x-cloak x-transition.opacity.duration.120ms @click.self="del = null" role="dialog" aria-modal="true">
+    <div class="modal">
+      <div class="modal-icon">{% icon "trash" 22 %}</div>
+      <h2>Delete <span x-text="del && del.name"></span>?</h2>
+      <template x-if="del && inUse(del)">
+        <p><b x-text="usage(del)"></b> use this unit, so it can't be removed. It will be marked <b>inactive</b> instead —
+          those products keep it, but new products can't pick it.</p>
+      </template>
+      <template x-if="del && !inUse(del)"><p>No product uses this unit. It will be removed for good.</p></template>
+      <p class="modal-err" x-show="delError" x-text="delError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="del = null" :disabled="deleting">Keep</button>
+        <button type="button" class="btn btn-danger" @click="remove()" :disabled="deleting"
+                x-text="deleting ? 'Working…' : (del && inUse(del) ? 'Make inactive' : 'Delete')"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" x-show="toast" x-cloak x-transition.opacity role="status" x-text="toast"></div>
+</div>
+{% endblock %}

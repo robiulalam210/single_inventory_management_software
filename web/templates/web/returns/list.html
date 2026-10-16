@@ -1,0 +1,202 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/returns.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  {% if can_create %}<a class="btn btn-primary top-act" href="{% url rt.new_url %}">{% icon "plus" 18 %}<span>New {{ rt.noun }} return</span></a>{% endif %}
+{% endblock %}
+{% block content %}
+<div x-data="returnList({ kind: '{{ rt.kind }}', canUpdate: {{ can_update|yesno:'true,false' }}, canDelete: {{ can_delete|yesno:'true,false' }} })"
+     @keydown.escape.window="confirm ? (confirm = null) : shut()">
+
+  <section class="panel filters">
+    <div class="f-row">
+      <label class="f-search">
+        {% icon "search" 18 %}
+        <input type="search" x-model="f.q" placeholder="Search {{ rt.no_label|lower }} no., {{ rt.party_label|lower }} or reason" aria-label="Search {{ rt.noun }} returns">
+      </label>
+      <div class="seg seg-sm" role="tablist" aria-label="Period">
+        <template x-for="p in presets" :key="p.key">
+          <button type="button" :class="{ 'is-on': f.preset === p.key }" @click="setPreset(p.key)" x-text="p.label"></button>
+        </template>
+      </div>
+    </div>
+    <div class="f-row" x-show="f.preset === 'custom'" x-cloak>
+      <label class="f-date"><span>From</span><input type="date" x-model="f.from" @change="applyCustom()"></label>
+      <label class="f-date"><span>To</span><input type="date" x-model="f.to" @change="applyCustom()"></label>
+    </div>
+    <div class="f-row">
+      <div class="chips" role="radiogroup" aria-label="Status">
+        <template x-for="t in statuses" :key="t.key">
+          <button type="button" class="chip" role="radio" :aria-checked="(f.status === t.key).toString()"
+                  :class="{ 'is-on': f.status === t.key }" @click="f.status = t.key" x-text="t.label"></button>
+        </template>
+      </div>
+      <div class="f-combos">
+        {% include "web/_combo.html" with model="f.party" source="parties" placeholder=rt.party_all icon="users" %}
+        <button type="button" class="btn-link" x-show="filtered" x-cloak @click="clearAll()">{% icon "filter-x" 16 %} Reset</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <template x-if="error">
+      <div class="empty">
+        <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2>Couldn't load {{ rt.noun }} returns</h2>
+        <p x-text="error"></p>
+        <button class="btn btn-ghost" @click="fetch()">Try again</button>
+      </div>
+    </template>
+
+    <template x-if="!error">
+      <div>
+        <table class="dt" :class="{ 'is-loading': loading }">
+          <thead>
+            <tr>
+              <th>{{ rt.no_label }}</th><th>{{ rt.party_label }}</th><th class="hide-md">Method</th><th class="hide-md">Reason</th>
+              <th class="num">Items</th><th class="num">Amount</th><th>Status</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="r in rows" :key="r.id">
+              <tr tabindex="0" @click="open(r)" @keydown.enter="open(r)" :aria-label="'Open return ' + no(r)">
+                <td data-k="{{ rt.no_label }}"><b class="inv" x-text="no(r)"></b><span class="sub" x-text="date(r.return_date)"></span></td>
+                <td data-k="{{ rt.party_label }}" x-text="partyName(r)"></td>
+                <td class="hide-md" data-k="Method" x-text="cap(r.payment_method)"></td>
+                <td class="hide-md" data-k="Reason" x-text="r.reason || '—'"></td>
+                <td class="num" data-k="Items" x-text="itemCount(r)"></td>
+                <td class="num" data-k="Amount"><b x-text="taka(r.return_amount)"></b></td>
+                <td data-k="Status"><span class="tag" :class="'tg-' + r.status" x-text="cap(r.status)"></span></td>
+                <td @click.stop>
+                  <div class="row-acts">
+                    <template x-if="canUpdate && r.status === 'pending'">
+                      <span class="row-acts">
+                        <button type="button" class="btn btn-ghost btn-sm" @click="ask('approve', r)">Approve</button>
+                        <button type="button" class="btn btn-ghost btn-sm" @click="ask('reject', r)">Reject</button>
+                      </span>
+                    </template>
+                    <template x-if="canUpdate && r.status === 'approved'">
+                      <button type="button" class="btn btn-ghost btn-sm" @click="ask('complete', r)">Complete</button>
+                    </template>
+                    <template x-if="canDeleteRow(r)">
+                      <button type="button" class="icon-btn danger" @click="ask('delete', r)" aria-label="Delete return" title="Delete">{% icon "trash" 18 %}</button>
+                    </template>
+                  </div>
+                </td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !rows.length ? 6 : 0)" :key="'sk' + i">
+              <tr class="sk-row"><td colspan="8"><span class="sk-line"></span></td></tr>
+            </template>
+          </tbody>
+        </table>
+
+        <template x-if="!loading && !rows.length">
+          <div class="empty">
+            <div class="tile">{% icon "return" 26 %}</div>
+            <h2 x-text="filtered ? 'No {{ rt.noun }} returns match these filters' : 'No {{ rt.noun }} returns yet'"></h2>
+            <p x-text="filtered ? 'Try a wider date range or clear the filters.' : '{{ rt.empty_hint }}'"></p>
+            <button class="btn btn-ghost" x-show="filtered" @click="clearAll()">Reset filters</button>
+            {% if can_create %}<a class="btn btn-primary" x-show="!filtered" href="{% url rt.new_url %}">{% icon "plus" 18 %} New {{ rt.noun }} return</a>{% endif %}
+          </div>
+        </template>
+
+        <nav class="pager" x-show="meta.count > 0" aria-label="Pages">
+          <span class="pager-info" x-text="`Showing ${from}–${to} of ${num(meta.count)}`"></span>
+          <div class="pager-btns" x-show="meta.total_pages > 1">
+            <button type="button" class="icon-btn" :disabled="page <= 1" @click="go(page - 1)" aria-label="Previous page">{% icon "chevron-left" 18 %}</button>
+            <template x-for="(p, i) in pages" :key="i + '-' + p">
+              <button type="button" class="pg" :class="{ 'is-on': p === page }" :disabled="p === '…'" @click="go(p)" x-text="p"></button>
+            </template>
+            <button type="button" class="icon-btn" :disabled="page >= meta.total_pages" @click="go(page + 1)" aria-label="Next page">{% icon "chevron-right" 18 %}</button>
+          </div>
+        </nav>
+      </div>
+    </template>
+  </section>
+
+  {# ───── detail drawer ───── #}
+  <div class="drawer-wrap" x-show="sel" x-cloak x-transition.opacity.duration.150ms @click.self="shut()">
+    <aside class="drawer drawer-wide" role="dialog" aria-modal="true" aria-label="{{ rt.noun|capfirst }} return" x-show="sel"
+           x-transition:enter="drawer-in" x-transition:enter-start="drawer-from" x-transition:enter-end="drawer-to">
+      <template x-if="sel">
+        <div class="drawer-body">
+          <header class="drawer-head no-print">
+            <div>
+              <h2 x-text="no(sel)"></h2>
+              <span class="tag" :class="'tg-' + sel.status" x-text="cap(sel.status)"></span>
+            </div>
+            <div class="drawer-actions">
+              <template x-if="canUpdate && sel.status === 'pending'">
+                <span class="row-acts">
+                  <button type="button" class="btn btn-primary" @click="ask('approve', sel)">Approve</button>
+                  <button type="button" class="btn btn-ghost" @click="ask('reject', sel)">Reject</button>
+                </span>
+              </template>
+              <template x-if="canUpdate && sel.status === 'approved'">
+                <button type="button" class="btn btn-primary" @click="ask('complete', sel)">Mark completed</button>
+              </template>
+              <template x-if="canDeleteRow(sel)">
+                <button type="button" class="icon-btn danger" @click="ask('delete', sel)" aria-label="Delete return" title="Delete">{% icon "trash" 18 %}</button>
+              </template>
+              <button type="button" class="btn btn-ghost" @click="print()">{% icon "printer" 18 %} <span>Print</span></button>
+              <button type="button" class="icon-btn" @click="shut()" aria-label="Close">{% icon "x" 18 %}</button>
+            </div>
+          </header>
+
+          <div class="invoice print-area">
+            <div class="inv-top">
+              <div><b class="inv-co">{{ web_company.name }}</b><span>{{ rt.noun|capfirst }} return</span></div>
+              <div class="inv-meta"><b x-text="no(sel)"></b><span x-text="date(sel.return_date)"></span></div>
+            </div>
+            <dl class="mr-facts">
+              <div><dt>{{ rt.party_label }}</dt><dd x-text="partyName(sel)"></dd></div>
+              <div><dt>{{ rt.refund_label }}</dt><dd x-text="cap(sel.payment_method) + (accountOf(sel) ? ', ' + accountOf(sel) : '')"></dd></div>
+              <div><dt>Reason</dt><dd x-text="sel.reason || 'No reason given'"></dd></div>
+            </dl>
+            <table class="rt-items">
+              <thead><tr><th>Product</th><th class="num">Qty</th><th class="num" x-show="cfg.hasDamage">Damaged</th><th class="num">Price</th><th class="num">Total</th></tr></thead>
+              <tbody>
+                <template x-for="it in (sel.items || [])" :key="it.id || it.product_id">
+                  <tr>
+                    <td x-text="it.product_name || 'Unknown'"></td>
+                    <td class="num" x-text="it.quantity"></td>
+                    <td class="num" x-show="cfg.hasDamage" x-text="it.damage_quantity || 0"></td>
+                    <td class="num" x-text="taka(it.unit_price)"></td>
+                    <td class="num" x-text="taka(it.total)"></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+            <div class="rt-sum">
+              <p x-show="Number(sel.return_charge) > 0"><span>Return charge <small x-show="sel.return_charge_type === 'percentage'" x-text="'(' + sel.return_charge + '%)'"></small></span>
+                <b x-text="sel.return_charge_type === 'percentage' ? '' : taka(sel.return_charge)"></b></p>
+              <p class="is-total"><span>Return amount</span><b x-text="taka(sel.return_amount)"></b></p>
+            </div>
+            <div class="mr-sign"><div><span></span>{{ rt.party_label }} signature</div><div><span></span>Authorised signature</div></div>
+          </div>
+        </div>
+      </template>
+    </aside>
+  </div>
+
+  {# ───── confirm ───── #}
+  <div class="modal-wrap" x-show="confirm" x-cloak x-transition.opacity.duration.120ms @click.self="confirm = null"
+       role="dialog" aria-modal="true" aria-labelledby="rt-confirm-title">
+    <div class="modal" x-show="confirm">
+      <div class="modal-icon">{% icon "return" 22 %}</div>
+      <h2 id="rt-confirm-title" x-text="confirmText && confirmText.title"></h2>
+      <p x-text="confirmText && confirmText.body"></p>
+      <p class="modal-err" x-show="confirmError" x-text="confirmError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="confirm = null" :disabled="working">Cancel</button>
+        <button type="button" class="btn" :class="confirmText && confirmText.danger ? 'btn-danger' : 'btn-primary'" @click="runConfirm()" :disabled="working">
+          <span x-text="working ? 'Please wait…' : (confirmText && confirmText.btn)"></span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" x-show="toast" x-cloak x-transition.opacity role="status" x-text="toast"></div>
+</div>
+{% endblock %}

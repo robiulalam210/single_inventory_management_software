@@ -1,0 +1,48 @@
+{% extends "web/base.html" %}
+{% load web_tags %}
+{% block content %}
+<div class="greet">
+  <div>
+    <h2>{{ greeting }}, {{ web_user.name }}</h2>
+    <p>{{ today|date:"l, j F Y" }}</p>
+  </div>
+</div>
+
+<div class="panel company-strip">
+  <span class="brand-logo">
+    {% if web_company.logo %}<img src="{{ web_company.logo }}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">{% else %}{% icon "building" 22 %}{% endif %}
+  </span>
+  <div>
+    <b>{{ web_company.name }}</b>
+    <span>Signed in as {{ web_user.email|default:web_user.name }}</span>
+  </div>
+  <span class="role">{{ web_user.role }}</span>
+</div>
+
+<section class="panel">
+  <div class="panel-head">
+    <h3>Quick access</h3>
+    <span>All {{ module_count }} of your modules are in the menu</span>
+  </div>
+  {% if shortcuts %}
+    <div class="shortcuts">
+      {% for s in shortcuts %}
+        <a class="shortcut" href="{{ s.href }}">
+          <span class="tile">{% icon s.icon 19 %}</span>
+          <span class="sc-text">
+            <b>{{ s.title }}</b>
+            <span>{{ s.section }}</span>
+          </span>
+          {% if not s.ready %}<span class="soon">Soon</span>{% endif %}
+        </a>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty">
+      <div class="tile">{% icon "lock" 26 %}</div>
+      <h2>No modules yet</h2>
+      <p>Your account does not have permission for any module. Ask your shop admin to set your permissions.</p>
+    </div>
+  {% endif %}
+</section>
+{% endblock %}

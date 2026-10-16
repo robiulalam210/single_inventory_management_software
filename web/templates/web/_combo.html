@@ -1,0 +1,29 @@
+{% load web_tags %}{# search সহ dropdown — model: parent এর field, source: parent এর option list #}
+<div class="combo" x-data="combo({ placeholder: '{{ placeholder|escapejs }}' })"
+     x-modelable="value" x-model="{{ model }}" x-effect="options = {{ source }}"
+     @click.outside="close()" @keydown.escape.stop="close()">
+  <button type="button" class="combo-btn" :class="{ 'has-value': value !== '' && value !== null }" @click="toggle()"
+          :aria-expanded="open.toString()" aria-haspopup="listbox">
+    {% if icon %}{% icon icon 17 %}{% endif %}
+    <span class="combo-text" x-text="label || placeholder">{{ placeholder }}</span>
+{% if not noclear %}    <span class="combo-clear" x-show="value !== '' && value !== null" x-cloak @click.stop="pick(null)" role="button" aria-label="Clear">{% icon "x" 15 %}</span>{% endif %}
+    {% icon "chevron-down" 16 "combo-chev" %}
+  </button>
+  <div class="combo-pop" x-show="open" x-cloak x-transition.opacity.duration.100ms>
+    <div class="combo-search">
+      {% icon "search" 16 %}
+      <input x-ref="q" type="text" x-model="q" @input="hi = 0" placeholder="Search…"
+             @keydown.arrow-down.prevent="move(1)" @keydown.arrow-up.prevent="move(-1)" @keydown.enter.prevent="enter()">
+    </div>
+    <ul class="combo-list" role="listbox" x-ref="list">
+      <template x-for="(o, i) in filtered" :key="o.value">
+        <li role="option" :aria-selected="(String(o.value) === String(value)).toString()"
+            :class="{ 'is-hi': i === hi, 'is-sel': String(o.value) === String(value) }"
+            @mouseenter="hi = i" @click="pick(o)">
+          <span x-text="o.label"></span><small x-show="o.sub" x-text="o.sub"></small>
+        </li>
+      </template>
+      <li class="combo-none" x-show="!filtered.length">No match</li>
+    </ul>
+  </div>
+</div>

@@ -1,0 +1,134 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/heads.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  {% if hd.perms.create %}<button type="button" class="btn btn-primary top-act" onclick="window.dispatchEvent(new CustomEvent('head-new'))">{% icon "plus" 18 %}<span>New head</span></button>{% endif %}
+{% endblock %}
+{% block content %}
+{{ hd|json_script:"hd-cfg" }}
+<div x-data="headsPage(JSON.parse(document.getElementById('hd-cfg').textContent))" @head-new.window="edit('head', null)" @keydown.escape.window="escape()">
+
+  <p class="tm-lead" x-text="cfg.explain"></p>
+
+  <section class="panel filters" x-show="heads.length" x-cloak>
+    <div class="f-row">
+      <label class="f-search">{% icon "search" 18 %}<input type="search" x-model="q" placeholder="Search heads" aria-label="Search heads"></label>
+      <label class="check" x-show="offCount"><input type="checkbox" x-model="showOff"> Show turned off (<span x-text="offCount"></span>)</label>
+    </div>
+  </section>
+
+  <template x-if="error">
+    <section class="panel empty"><div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+      <h2>Couldn't load heads</h2><p x-text="error"></p><button class="btn btn-ghost" @click="load()">Try again</button></section>
+  </template>
+
+  <template x-if="!loading && !error && !heads.length && !form">
+    <section class="panel un-start">
+      <div class="tile">{% icon hd.icon 28 %}</div>
+      <h2>No heads yet</h2>
+      <p x-text="cfg.empty_text"></p>
+      <template x-if="perms.create"><button class="btn btn-primary" @click="edit('head', null)">{% icon "plus" 18 %} New head</button></template>
+    </section>
+  </template>
+
+  <div class="hd-list" x-show="heads.length || loading || form">
+    {# new head inline form #}
+    <template x-if="form && form.type === 'head' && !form.id">
+      <form class="panel hd-form" @submit.prevent="saveForm()">
+        <input id="hd-name" class="in" type="text" maxlength="255" x-model="form.name" @input="fe = ''" :placeholder="isExp ? 'e.g. Utilities' : 'e.g. Rent received'">
+        <button type="submit" class="btn btn-primary" :disabled="saving">Add head</button>
+        <button type="button" class="btn btn-ghost" @click="form = null">Cancel</button>
+        <p class="fld-err" x-show="fe" x-text="fe"></p>
+      </form>
+    </template>
+
+    <template x-for="h in shown" :key="h.id">
+      <section class="panel hd-card" :class="{ 'is-off': h.is_active === false }">
+        <div class="hd-row">
+          <button type="button" class="hd-caret" x-show="isExp" @click="toggleOpen(h)" :aria-expanded="(!!open[h.id]).toString()" :aria-label="'Sub heads of ' + h.name">
+            <span :class="{ 'is-open': open[h.id] }">{% icon "chevron-right" 16 %}</span></button>
+          <template x-if="form && form.type === 'head' && form.id === h.id">
+            <form class="hd-inline" @submit.prevent="saveForm()">
+              <input id="hd-name" class="in" type="text" maxlength="255" x-model="form.name" @input="fe = ''">
+              <button type="submit" class="btn btn-primary btn-sm" :disabled="saving">Save</button>
+              <button type="button" class="btn btn-ghost btn-sm" @click="form = null">Cancel</button>
+              <p class="fld-err" x-show="fe" x-text="fe"></p>
+            </form>
+          </template>
+          <template x-if="!(form && form.type === 'head' && form.id === h.id)">
+            <div class="hd-name">
+              <b x-text="h.name"></b><span class="pill st-off" x-show="h.is_active === false">Off</span>
+              <small x-show="isExp" x-text="h.subhead_count ? h.subhead_count + (h.subhead_count === 1 ? ' sub head' : ' sub heads') : 'No sub heads'"></small>
+            </div>
+          </template>
+          <a class="hd-total" :href="listLink(h)" x-show="count(h)">
+            <b x-text="taka(total(h))"></b><small x-text="count(h) + (count(h) === 1 ? ' entry' : ' entries') + ' · all time'"></small></a>
+          <span class="hd-total muted" x-show="!count(h)"><small>Nothing recorded yet</small></span>
+          <span class="un-acts">
+            <template x-if="perms.edit"><button type="button" class="icon-btn sm" @click="edit('head', h)" :aria-label="'Rename ' + h.name" title="Rename">{% icon "pencil" 16 %}</button></template>
+            <template x-if="perms.edit"><button type="button" class="icon-btn sm" @click="toggle('head', h)" :title="h.is_active === false ? 'Turn on' : 'Turn off'" :aria-label="(h.is_active === false ? 'Turn on ' : 'Turn off ') + h.name">
+              <span x-show="h.is_active !== false">{% icon "eye-dim" 16 %}</span><span x-show="h.is_active === false">{% icon "eye" 16 %}</span></button></template>
+            <template x-if="perms.delete"><button type="button" class="icon-btn sm danger" @click="askDelete('head', h)" :aria-label="'Delete ' + h.name" title="Delete">{% icon "trash" 16 %}</button></template>
+          </span>
+        </div>
+
+        <div class="hd-subs" x-show="isExp && open[h.id]" x-cloak>
+          <template x-for="s in subsOf(h)" :key="s.id">
+            <div class="hd-sub" :class="{ 'is-off': s.is_active === false }">
+              <template x-if="form && form.type === 'sub' && form.id === s.id">
+                <form class="hd-inline" @submit.prevent="saveForm()">
+                  <input id="hd-name" class="in" type="text" maxlength="255" x-model="form.name" @input="fe = ''">
+                  <button type="submit" class="btn btn-primary btn-sm" :disabled="saving">Save</button>
+                  <button type="button" class="btn btn-ghost btn-sm" @click="form = null">Cancel</button>
+                  <p class="fld-err" x-show="fe" x-text="fe"></p>
+                </form>
+              </template>
+              <template x-if="!(form && form.type === 'sub' && form.id === s.id)">
+                <span class="hd-sub-name"><span x-text="s.name"></span><span class="pill st-off" x-show="s.is_active === false">Off</span></span>
+              </template>
+              <span class="un-acts">
+                <template x-if="perms.edit"><button type="button" class="icon-btn sm" @click="edit('sub', s)" :aria-label="'Rename ' + s.name" title="Rename">{% icon "pencil" 15 %}</button></template>
+                <template x-if="perms.edit"><button type="button" class="icon-btn sm" @click="toggle('sub', s)" :title="s.is_active === false ? 'Turn on' : 'Turn off'" :aria-label="(s.is_active === false ? 'Turn on ' : 'Turn off ') + s.name">
+                  <span x-show="s.is_active !== false">{% icon "eye-dim" 15 %}</span><span x-show="s.is_active === false">{% icon "eye" 15 %}</span></button></template>
+                <template x-if="perms.delete"><button type="button" class="icon-btn sm danger" @click="askDelete('sub', s)" :aria-label="'Delete ' + s.name" title="Delete">{% icon "trash" 15 %}</button></template>
+              </span>
+            </div>
+          </template>
+          <template x-if="form && form.type === 'sub' && !form.id && form.head === h.id">
+            <form class="hd-inline hd-sub" @submit.prevent="saveForm()">
+              <input id="hd-name" class="in" type="text" maxlength="255" x-model="form.name" @input="fe = ''" placeholder="e.g. Electricity">
+              <button type="submit" class="btn btn-primary btn-sm" :disabled="saving">Add</button>
+              <button type="button" class="btn btn-ghost btn-sm" @click="form = null">Cancel</button>
+              <p class="fld-err" x-show="fe" x-text="fe"></p>
+            </form>
+          </template>
+          <template x-if="perms.create && !(form && form.type === 'sub' && !form.id && form.head === h.id)">
+            <button type="button" class="btn-link hd-add" @click="edit('sub', null, h)">{% icon "plus" 15 %} Add sub head</button>
+          </template>
+        </div>
+      </section>
+    </template>
+    <template x-for="i in (loading && !heads.length ? 4 : 0)" :key="'sk' + i">
+      <section class="panel hd-card"><div class="hd-row"><span class="sk-line" style="width:35%"></span></div></section>
+    </template>
+    <p class="rows-empty" x-show="!loading && heads.length && !shown.length" x-cloak>Nothing matches.</p>
+  </div>
+
+  <div class="modal-wrap" x-show="del" x-cloak x-transition.opacity.duration.120ms @click.self="del = null" role="dialog" aria-modal="true">
+    <div class="modal">
+      <div class="modal-icon">{% icon "trash" 22 %}</div>
+      <h2>Delete <span x-text="del && del.item.name"></span>?</h2>
+      <p x-show="delUsed === true">It has entries or sub heads, so it will be <b>turned off</b> instead — past records keep its name.</p>
+      <p x-show="delUsed === false">Nothing uses it yet. It will be removed for good.</p>
+      <p x-show="delUsed === null">If any expense uses it, it is turned off instead of deleted.</p>
+      <p class="modal-err" x-show="delError" x-text="delError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="del = null" :disabled="deleting">Keep</button>
+        <button type="button" class="btn btn-danger" @click="remove()" :disabled="deleting" x-text="deleting ? 'Working…' : (delUsed ? 'Turn off' : 'Delete')"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" x-show="toast" x-cloak x-transition.opacity role="status" x-text="toast"></div>
+</div>
+{% endblock %}

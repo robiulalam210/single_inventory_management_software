@@ -1,0 +1,153 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/audit.js' %}"></script>{% endblock %}
+{% block content %}
+<div x-data="auditPage()" @keydown.escape.window="shut()">
+
+  {# ───── summary ───── #}
+  <div class="sumbar sb-5" aria-live="polite">
+    <div><span>All records</span><b x-text="meta ? num(meta.total) : '—'"></b></div>
+    <div><span>Today</span><b x-text="meta ? num(meta.today) : '—'"></b></div>
+    <div><span>Created today</span><b class="txt-ok" x-text="meta ? num(meta.today_create) : '—'"></b></div>
+    <div><span>Changed today</span><b x-text="meta ? num(meta.today_update) : '—'"></b></div>
+    <div><span>Deleted today</span><b class="txt-due" x-text="meta ? num(meta.today_delete) : '—'"></b></div>
+  </div>
+
+  {# ───── filters ───── #}
+  <section class="panel filters">
+    <div class="f-row">
+      <label class="f-search">
+        {% icon "search" 18 %}
+        <input type="search" x-model="f.q" placeholder="Search record name or user" aria-label="Search audit log">
+      </label>
+      <div class="seg seg-sm" role="tablist" aria-label="Period">
+        <template x-for="p in presets" :key="p.key">
+          <button type="button" :class="{ 'is-on': f.preset === p.key }" @click="setPreset(p.key)" x-text="p.label"></button>
+        </template>
+      </div>
+    </div>
+    <div class="f-row" x-show="f.preset === 'custom'" x-cloak>
+      <label class="f-date"><span>From</span><input type="date" x-model="f.d1" @change="applyCustom()"></label>
+      <label class="f-date"><span>To</span><input type="date" x-model="f.d2" @change="applyCustom()"></label>
+    </div>
+    <div class="f-row">
+      <div class="chips" role="radiogroup" aria-label="Action">
+        <template x-for="t in actions" :key="t.key">
+          <button type="button" class="chip" role="radio" :aria-checked="(f.action === t.key).toString()"
+                  :class="{ 'is-on': f.action === t.key }" @click="f.action = t.key" x-text="t.label"></button>
+        </template>
+      </div>
+      <div class="f-combos">
+        {% include "web/_combo.html" with model="f.model" source="models" placeholder="All record types" icon="box" %}
+        {% include "web/_combo.html" with model="f.user" source="users" placeholder="Anyone" icon="user" %}
+        {% include "web/_combo.html" with model="f.source" source="sources" placeholder="Any app" icon="globe" %}
+        <button type="button" class="btn-link" x-show="filtered" x-cloak @click="clearAll()">{% icon "filter-x" 16 %} Reset</button>
+      </div>
+    </div>
+  </section>
+
+  {# ───── list ───── #}
+  <section class="panel">
+    <template x-if="error">
+      <div class="empty">
+        <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2>Couldn't load the audit log</h2>
+        <p x-text="error"></p>
+        <button class="btn btn-ghost" @click="fetch()">Try again</button>
+      </div>
+    </template>
+
+    <template x-if="!error">
+      <div>
+        <table class="dt" :class="{ 'is-loading': loading }">
+          <thead><tr><th>When</th><th>Action</th><th>Record</th><th>What changed</th><th class="hide-md">By</th><th class="hide-md">From</th></tr></thead>
+          <tbody>
+            <template x-for="r in rows" :key="r.id">
+              <tr tabindex="0" @click="open(r)" @keydown.enter="open(r)" :aria-label="'Open ' + actionName(r.action) + ' ' + modelName(r.model)">
+                <td data-k="When"><span x-text="dt(r.created_at)"></span></td>
+                <td data-k="Action"><span class="tag" :class="'tg-' + r.action" x-text="actionName(r.action)"></span></td>
+                <td data-k="Record"><b x-text="modelName(r.model)"></b><span class="sub" x-text="r.object_repr || ('#' + r.object_id)"></span></td>
+                <td data-k="What changed" x-text="summaryLine(r)"></td>
+                <td class="hide-md" data-k="By" x-text="who(r)"></td>
+                <td class="hide-md" data-k="From"><span x-text="sourceName(r.source)"></span><span class="sub" x-show="r.device" x-text="r.device"></span></td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !rows.length ? 6 : 0)" :key="'sk' + i">
+              <tr class="sk-row"><td colspan="6"><span class="sk-line"></span></td></tr>
+            </template>
+          </tbody>
+        </table>
+
+        <template x-if="!loading && !rows.length">
+          <div class="empty">
+            <div class="tile">{% icon "shield" 26 %}</div>
+            <h2 x-text="filtered ? 'Nothing matches these filters' : 'No activity today yet'"></h2>
+            <p x-text="filtered ? 'Try a wider date range or clear the filters.' : 'Every change anyone makes is recorded here. Pick a longer period to see earlier activity.'"></p>
+            <button class="btn btn-ghost" x-show="filtered" @click="clearAll()">Reset filters</button>
+            <button class="btn btn-ghost" x-show="!filtered" @click="setPreset('all')">Show all time</button>
+          </div>
+        </template>
+
+        <nav class="pager" x-show="total > 0" aria-label="Pages">
+          <span class="pager-info" x-text="`Showing ${from}–${to} of ${num(total)}`"></span>
+          <div class="pager-btns" x-show="pages_n > 1">
+            <button type="button" class="icon-btn" :disabled="page <= 1" @click="go(page - 1)" aria-label="Previous page">{% icon "chevron-left" 18 %}</button>
+            <template x-for="(p, i) in pages" :key="i + '-' + p">
+              <button type="button" class="pg" :class="{ 'is-on': p === page }" :disabled="p === '…'" @click="go(p)" x-text="p"></button>
+            </template>
+            <button type="button" class="icon-btn" :disabled="page >= pages_n" @click="go(page + 1)" aria-label="Next page">{% icon "chevron-right" 18 %}</button>
+          </div>
+        </nav>
+      </div>
+    </template>
+  </section>
+
+  {# ───── detail drawer ───── #}
+  <div class="drawer-wrap" x-show="sel" x-cloak x-transition.opacity.duration.150ms @click.self="shut()">
+    <aside class="drawer drawer-wide" role="dialog" aria-modal="true" aria-label="Audit entry" x-show="sel"
+           x-transition:enter="drawer-in" x-transition:enter-start="drawer-from" x-transition:enter-end="drawer-to">
+      <template x-if="sel">
+        <div class="drawer-body">
+          <header class="drawer-head">
+            <div>
+              <h2 x-text="modelName(sel.model)"></h2>
+              <span class="tag" :class="'tg-' + sel.action" x-text="actionName(sel.action)"></span>
+            </div>
+            <div class="drawer-actions">
+              <button type="button" class="icon-btn" @click="shut()" aria-label="Close">{% icon "x" 18 %}</button>
+            </div>
+          </header>
+
+          <div class="dv-body">
+          <dl class="mr-facts" style="margin-top:0">
+            <div><dt>Record</dt><dd x-text="(sel.object_repr || '—') + (sel.object_id ? '  (#' + sel.object_id + ')' : '')"></dd></div>
+            <div><dt>Done by</dt><dd x-text="who(sel)"></dd></div>
+            <div><dt>Recorded at</dt><dd x-text="dt(sel.created_at)"></dd></div>
+            <div x-show="sel.client_time && sel.client_time !== sel.created_at"><dt>Done at (on the device)</dt><dd x-text="dt(sel.client_time)"></dd></div>
+            <div><dt>From</dt><dd x-text="sourceName(sel.source) + (sel.device ? ', device ' + sel.device : '')"></dd></div>
+            <div x-show="sel.ip"><dt>IP address</dt><dd x-text="sel.ip"></dd></div>
+          </dl>
+
+          <h3 class="dv-sec">What changed</h3>
+          <template x-if="sel.changes && sel.changes.length">
+            <div class="dv-card" style="padding:6px 14px 8px"><table class="au-chg" style="margin-top:6px">
+              <thead><tr><th>Field</th><th x-show="sel.action !== 'create'">Before</th><th x-show="sel.action !== 'delete'">After</th></tr></thead>
+              <tbody>
+                <template x-for="c in sel.changes" :key="c.field">
+                  <tr>
+                    <td><b x-text="c.field.replace(/_/g, ' ')"></b></td>
+                    <td x-show="sel.action !== 'create'"><span x-show="val(c.old) !== null" class="au-old" x-text="val(c.old)"></span><span x-show="val(c.old) === null" class="au-empty">empty</span></td>
+                    <td x-show="sel.action !== 'delete'"><span x-show="val(c.new) !== null" class="au-new" x-text="val(c.new)"></span><span x-show="val(c.new) === null" class="au-empty">empty</span></td>
+                  </tr>
+                </template>
+              </tbody>
+            </table></div>
+          </template>
+          <p class="fld-hint" x-show="!sel.changes || !sel.changes.length">No field details were recorded for this entry.</p>
+          </div>
+        </div>
+      </template>
+    </aside>
+  </div>
+</div>
+{% endblock %}

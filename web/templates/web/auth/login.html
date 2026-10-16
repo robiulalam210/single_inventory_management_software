@@ -1,0 +1,109 @@
+{% load static web_tags %}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Sign in — Meherin Mart</title>
+  <link rel="preload" href="{% static 'web/fonts/ibm-plex-sans-latin-400-normal.woff2' %}" as="font" type="font/woff2" crossorigin>
+  <link rel="icon" href="{% static 'web/img/favicon.svg' %}" type="image/svg+xml">
+  <link rel="stylesheet" href="{% static 'web/css/app.css' %}">
+  <script>try{var t=localStorage.getItem("mm-theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+  <script defer src="{% static 'web/vendor/alpine-3.14.9.min.js' %}"></script>
+</head>
+<body>
+<main class="auth">
+
+  <section class="auth-brand" aria-label="Meherin Mart">
+    <div class="brand-mark">
+      <span class="brand-logo">M</span>
+      Meherin Mart
+    </div>
+
+    <div class="auth-pitch">
+      {# দোকানের দৈনন্দিন কাজের ছবি — একটা বিক্রির রসিদ #}
+      <div class="slip" aria-hidden="true">
+        <div class="slip-head"><b>INV-1042</b><span>Today, 11:42 AM</span></div>
+        <div class="slip-row"><span>Miniket rice 25 kg</span><span>৳ 1,850.00</span></div>
+        <div class="slip-row"><span>Soybean oil 5 L × 2</span><span>৳ 1,780.00</span></div>
+        <div class="slip-row"><span>Lentils 2 kg</span><span>৳ 290.00</span></div>
+        <div class="slip-row"><span>Sugar 1 kg × 3</span><span>৳ 400.00</span></div>
+        <div class="slip-total"><span>Total</span><span>৳ 4,320.00</span></div>
+        <span class="slip-stamp">PAID</span>
+      </div>
+      <h2>Your shop, from any browser.</h2>
+      <p>Sales, stock, dues and reports — the same data as your desktop and mobile app, always in sync.</p>
+    </div>
+  </section>
+
+  <section class="auth-main">
+    <div class="auth-card"
+         x-data="{ show: false, busy: false }">
+      <h1>Sign in</h1>
+      <p class="lede">Use the same username or email and password as the app.</p>
+
+      {% for message in messages %}
+        <div class="notice notice-ok" role="status">{% icon "check-circle" 18 %}<span>{{ message }}</span></div>
+      {% endfor %}
+      {% if info %}
+        <div class="notice notice-info" role="status">{% icon "clock" 18 %}<span>{{ info }}</span></div>
+      {% endif %}
+      {% if error %}
+        <div class="notice notice-error" role="alert">{% icon "alert" 18 %}<span>{{ error }}</span></div>
+      {% endif %}
+      {% if warning %}
+        <div class="notice notice-warn" role="status">{% icon "info" 18 %}<span>{{ warning }}</span></div>
+      {% endif %}
+
+      <form method="post" action="{% url 'web:login' %}" novalidate @submit="busy = true">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ next }}">
+
+        <label class="field">
+          <span class="field-label">Username or email</span>
+          <span class="input-wrap">
+            {% icon "user" 18 %}
+            <input class="input{% if error and not locked %} is-invalid{% endif %}" type="text" name="identifier"
+                   value="{{ identifier }}" autocomplete="username" autocapitalize="none" spellcheck="false"
+                   required {% if not identifier %}autofocus{% endif %} placeholder="e.g. robiul or robiul@shop.com">
+          </span>
+        </label>
+
+        <label class="field">
+          <span class="field-label">Password</span>
+          <span class="input-wrap">
+            {% icon "lock" 18 %}
+            <input class="input{% if error and not locked %} is-invalid{% endif %}" :type="show ? 'text' : 'password'"
+                   type="password" name="password" autocomplete="current-password" required
+                   {% if identifier %}autofocus{% endif %} placeholder="Your password">
+            <button type="button" class="input-action" @click="show = !show"
+                    :aria-label="show ? 'Hide password' : 'Show password'" aria-label="Show password">
+              <span x-show="!show">{% icon "eye" 18 %}</span>
+              <span x-show="show" x-cloak>{% icon "eye-off" 18 %}</span>
+            </button>
+          </span>
+        </label>
+
+        <div class="auth-row">
+          <label class="check">
+            <input type="checkbox" name="remember" {% if remember %}checked{% endif %}>
+            Keep me signed in for 7 days
+          </label>
+        </div>
+
+        <button class="btn btn-primary btn-block" type="submit" :disabled="busy || {{ locked|yesno:'true,false' }}"
+                {% if locked %}disabled{% endif %}>
+          <span x-text="busy ? 'Signing in…' : '{{ locked|yesno:'Sign-in paused,Sign in' }}'">{{ locked|yesno:'Sign-in paused,Sign in' }}</span>
+        </button>
+      </form>
+
+      <p class="auth-foot">
+        {% icon "key" 18 %}
+        <span>Forgot your password? Ask your shop admin to reset it from the Staff screen.</span>
+      </p>
+    </div>
+  </section>
+
+</main>
+</body>
+</html>

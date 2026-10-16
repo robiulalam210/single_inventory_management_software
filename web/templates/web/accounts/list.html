@@ -1,0 +1,215 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/accounts.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  {% if ac_perms.create %}<button type="button" class="btn btn-primary top-act" onclick="window.dispatchEvent(new CustomEvent('account-new'))">{% icon "plus" 18 %}<span>New account</span></button>{% endif %}
+{% endblock %}
+{% block content %}
+{{ ac_perms|json_script:"ac-perms" }}
+{{ web_company.name|json_script:"ac-company" }}
+<div x-data="accountList(JSON.parse(document.getElementById('ac-perms').textContent), JSON.parse(document.getElementById('ac-company').textContent))"
+     @account-new.window="openForm(null)"
+     @keydown.escape.window="formOpen ? (formOpen = false) : (confirmDel ? (confirmDel = false) : shut())">
+
+  {# ───────────── total ───────────── #}
+  <section class="panel ac-total">
+    <div>
+      <span>Money you have right now</span>
+      <b x-text="loading && !accounts.length ? '—' : taka(total)"></b>
+      <small x-text="activeList.length + (activeList.length === 1 ? ' active account' : ' active accounts')"></small>
+    </div>
+    <div class="ac-split" x-show="activeList.length">
+      <template x-for="g in byType" :key="g.type">
+        <div class="ac-split-row">
+          <span class="ac-dot" :class="'t-' + g.key"></span>
+          <span x-text="g.type"></span>
+          <b x-text="taka(g.total)"></b>
+          <i :style="'width:' + g.pct + '%'" :class="'t-' + g.key"></i>
+        </div>
+      </template>
+    </div>
+  </section>
+
+  <div class="ac-head">
+    <h3>Accounts</h3>
+    <label class="check"><input type="checkbox" x-model="showInactive"> Show inactive</label>
+  </div>
+
+  <template x-if="error">
+    <section class="panel empty">
+      <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+      <h2>Couldn't load accounts</h2><p x-text="error"></p>
+      <button class="btn btn-ghost" @click="load()">Try again</button>
+    </section>
+  </template>
+
+  <div class="ac-grid" x-show="!error">
+    <template x-for="a in shown" :key="a.id">
+      <button type="button" class="ac-card" :class="['t-' + typeKey(a), a.is_active ? '' : 'is-off']" @click="open(a)">
+        <span class="ac-ic">
+          <template x-if="typeKey(a) === 'cash'"><span>{% icon "wallet" 20 %}</span></template>
+          <template x-if="typeKey(a) === 'bank'"><span>{% icon "building" 20 %}</span></template>
+          <template x-if="typeKey(a) === 'mobile'"><span>{% icon "phone" 20 %}</span></template>
+          <template x-if="typeKey(a) === 'other'"><span>{% icon "coins" 20 %}</span></template>
+        </span>
+        <span class="ac-type" x-text="a.ac_type + (a.is_active ? '' : ' · Inactive')"></span>
+        <b class="ac-name" x-text="a.name"></b>
+        <span class="ac-num" x-text="[a.bank_name, a.ac_number].filter(Boolean).join(' · ') || ' '"></span>
+        <span class="ac-bal" :class="{ 'txt-due': Number(a.balance) < 0 }" x-text="taka(a.balance)"></span>
+      </button>
+    </template>
+    <template x-for="i in (loading && !accounts.length ? 4 : 0)" :key="'sk' + i">
+      <div class="ac-card ac-sk"><span class="sk-line" style="width:40%"></span><span class="sk-line"></span><span class="sk-line" style="width:60%"></span></div>
+    </template>
+    <template x-if="!loading && !shown.length">
+      <div class="panel empty" style="grid-column: 1 / -1">
+        <div class="tile">{% icon "wallet" 26 %}</div>
+        <h2>No accounts yet</h2>
+        <p>Add your cash box, bank accounts and mobile wallets (bKash, Nagad). Every sale, purchase and expense moves money in or out of one of them.</p>
+        <template x-if="perms.create"><button class="btn btn-primary" @click="openForm(null)">{% icon "plus" 18 %} New account</button></template>
+      </div>
+    </template>
+  </div>
+
+  {# ───────────── statement drawer ───────────── #}
+  <div class="drawer-wrap" x-show="sel" x-cloak x-transition.opacity.duration.150ms @click.self="shut()">
+    <aside class="drawer drawer-wide" role="dialog" aria-modal="true" aria-label="Account statement" x-show="sel"
+           x-transition:enter="drawer-in" x-transition:enter-start="drawer-from" x-transition:enter-end="drawer-to">
+      <template x-if="sel">
+        <div class="drawer-body">
+          <header class="drawer-head no-print">
+            <div><h2 x-text="sel.name"></h2><span class="pill" :class="sel.is_active ? 'st-paid' : 'st-cancelled'" x-text="sel.is_active ? 'Active' : 'Inactive'"></span></div>
+            <div class="drawer-actions">
+              <template x-if="perms.delete"><button type="button" class="icon-btn danger" @click="askDelete()" aria-label="Delete account" title="Delete">{% icon "trash" 18 %}</button></template>
+              <template x-if="perms.edit"><button type="button" class="btn btn-ghost" @click="openForm(sel)">{% icon "settings" 17 %} <span>Edit</span></button></template>
+              <button type="button" class="btn btn-ghost" @click="print()" :disabled="!st.rows">{% icon "printer" 18 %} <span>Print</span></button>
+              <button type="button" class="icon-btn" @click="shut()" aria-label="Close">{% icon "x" 18 %}</button>
+            </div>
+          </header>
+
+          <div class="st-bar no-print">
+            <div class="seg seg-sm">
+              <template x-for="p in presets" :key="p.key">
+                <button type="button" :class="{ 'is-on': st.preset === p.key }" @click="setPreset(p.key)" x-text="p.label"></button>
+              </template>
+            </div>
+            <template x-if="perms.edit">
+              <button type="button" class="btn-link" @click="toggleActive()" x-text="sel.is_active ? 'Deactivate' : 'Activate'"></button>
+            </template>
+          </div>
+          <div class="st-custom no-print" x-show="st.preset === 'custom'">
+            <label class="f-date"><span>From</span><input type="date" x-model="st.from" @change="loadStatement()"></label>
+            <label class="f-date"><span>To</span><input type="date" x-model="st.to" @change="loadStatement()"></label>
+          </div>
+
+          <div class="statement print-area">
+            <div class="inv-top">
+              <div><b class="inv-co" x-text="company"></b><span>Account statement</span></div>
+              <div class="inv-meta"><b x-text="sel.name"></b>
+                <span x-text="[sel.ac_type, sel.bank_name, sel.ac_number].filter(Boolean).join(' · ')"></span>
+                <span x-text="rangeText"></span></div>
+            </div>
+            <template x-if="st.error"><p class="form-err">{% icon "alert" 16 %}<span x-text="st.error"></span></p></template>
+            <template x-if="st.data">
+              <div>
+                <div class="st-sum">
+                  <div><span>Opening</span><b x-text="taka(st.data.opening_balance)"></b></div>
+                  <div><span>Money in</span><b class="txt-ok" x-text="taka(st.data.money_in)"></b></div>
+                  <div><span>Money out</span><b class="txt-due" x-text="taka(st.data.money_out)"></b></div>
+                  <div class="is-due" :class="{ 'is-zero': st.data.closing_balance >= 0 }"><span>Closing</span><b x-text="taka(st.data.closing_balance)"></b></div>
+                </div>
+                <div class="recon no-print" x-show="Math.abs(st.data.unexplained) >= 0.01">
+                  {% icon "info" 16 %}
+                  <span>The account shows <b x-text="taka(st.data.account.balance)"></b>, but its recorded transactions add up to
+                    <b x-text="taka(round2(st.data.account.balance - st.data.unexplained))"></b>.
+                    The difference of <b x-text="taka(Math.abs(st.data.unexplained))"></b> was changed without a transaction
+                    (set directly, or by an older version of the app). Check it against your real cash or bank statement.</span>
+                </div>
+              </div>
+            </template>
+            <table class="inv-items st-table">
+              <thead><tr><th>Date</th><th>Details</th><th class="num">In</th><th class="num">Out</th><th class="num">Balance</th></tr></thead>
+              <tbody>
+                <tr class="st-open" x-show="st.data"><td x-text="st.data && st.data.start ? date(st.data.start) : ''"></td><td><b>Opening balance</b></td><td></td><td></td>
+                  <td class="num" x-text="st.data && taka(st.data.opening_balance)"></td></tr>
+                <template x-for="r in (st.data ? st.data.rows : [])" :key="r.id">
+                  <tr :class="{ 'is-void': r.status === 'cancelled' }">
+                    <td><span x-text="date(r.date)"></span><span class="sub" x-text="time(r.date)"></span></td>
+                    <td><b x-text="label(r)"></b><span class="sub" x-text="r.description"></span></td>
+                    <td class="num txt-ok" x-text="r.type === 'credit' ? taka(r.amount) : ''"></td>
+                    <td class="num txt-due" x-text="r.type === 'debit' ? taka(r.amount) : ''"></td>
+                    <td class="num" x-text="taka(r.balance)"></td>
+                  </tr>
+                </template>
+                <tr x-show="st.loading"><td colspan="5" class="rows-empty">Loading…</td></tr>
+                <tr x-show="st.data && !st.data.rows.length && !st.loading"><td colspan="5" class="rows-empty">No money moved in or out in this period.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </template>
+    </aside>
+  </div>
+
+  {# ───────────── add / edit ───────────── #}
+  <div class="modal-wrap" x-show="formOpen" x-cloak x-transition.opacity.duration.120ms @click.self="formOpen = false" role="dialog" aria-modal="true" aria-labelledby="af-title">
+    <form class="modal modal-wide" @submit.prevent="saveForm()" novalidate>
+      <h2 id="af-title" x-text="form.id ? 'Edit account' : 'New account'"></h2>
+      <p class="modal-sub" x-text="form.id ? form.ac_no : 'Where you keep money: a cash box, a bank account or a mobile wallet.'"></p>
+      <div class="fld">
+        <label class="fld-label">Type <i>*</i></label>
+        <div class="seg seg-fill" role="radiogroup">
+          <template x-for="t in types" :key="t">
+            <button type="button" role="radio" :aria-checked="(form.ac_type === t).toString()" :class="{ 'is-on': form.ac_type === t }" @click="form.ac_type = t; fe.number = ''" x-text="t"></button>
+          </template>
+        </div>
+      </div>
+      <div class="fld-row">
+        <div class="fld" :class="{ 'has-error': fe.name }">
+          <label class="fld-label" for="af-name">Name <i>*</i></label>
+          <input id="af-name" x-ref="afName" class="in" type="text" maxlength="150" x-model="form.name" @input="fe.name = ''"
+                 :placeholder="form.ac_type === 'Bank' ? 'e.g. City Bank current' : (form.ac_type === 'Mobile banking' ? 'e.g. bKash merchant' : 'e.g. Shop cash box')">
+          <p class="fld-err" x-show="fe.name" x-text="fe.name"></p>
+        </div>
+        <div class="fld" :class="{ 'has-error': fe.number }" x-show="form.ac_type !== 'Cash'">
+          <label class="fld-label" for="af-num"><span x-text="form.ac_type === 'Mobile banking' ? 'Wallet number' : 'Account number'"></span>
+            <i x-show="form.ac_type === 'Bank' || form.ac_type === 'Mobile banking'">*</i></label>
+          <input id="af-num" class="in" type="text" maxlength="64" x-model="form.ac_number" @input="fe.number = ''">
+          <p class="fld-err" x-show="fe.number" x-text="fe.number"></p>
+        </div>
+      </div>
+      <div class="fld-row" x-show="form.ac_type === 'Bank'" x-cloak>
+        <div class="fld"><label class="fld-label" for="af-bank">Bank name</label><input id="af-bank" class="in" type="text" maxlength="150" x-model="form.bank_name"></div>
+        <div class="fld"><label class="fld-label" for="af-branch">Branch</label><input id="af-branch" class="in" type="text" maxlength="150" x-model="form.branch"></div>
+      </div>
+      <div class="fld" :class="{ 'has-error': fe.opening }">
+        <label class="fld-label" for="af-open">Opening balance</label>
+        <div class="money-in sm"><span>৳</span><input id="af-open" type="text" inputmode="decimal" x-model="form.opening_balance" @input="fe.opening = ''; form.opening_balance = form.opening_balance.replace(/[^0-9.]/g, '')" placeholder="0.00"></div>
+        <p class="fld-hint" x-show="!form.id">How much is in it today, before using this software.</p>
+        <p class="fld-hint warn" x-show="form.id && openingDelta" x-cloak
+           x-text="'The balance will change by ' + (openingDelta > 0 ? '+' : '−') + taka(Math.abs(openingDelta)) + ' as well.'"></p>
+      </div>
+      <p class="modal-err" x-show="formError" x-text="formError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="formOpen = false" :disabled="formSaving">Cancel</button>
+        <button type="submit" class="btn btn-primary" :disabled="formSaving" x-text="formSaving ? 'Saving…' : (form.id ? 'Save changes' : 'Add account')"></button>
+      </div>
+    </form>
+  </div>
+
+  <div class="modal-wrap" x-show="confirmDel" x-cloak x-transition.opacity.duration.120ms @click.self="confirmDel = false" role="dialog" aria-modal="true">
+    <div class="modal">
+      <div class="modal-icon">{% icon "trash" 22 %}</div>
+      <h2>Delete <span x-text="sel && sel.name"></span>?</h2>
+      <p>If any money has moved through this account, it is marked inactive instead, so your sales, purchases and expenses keep their history. Otherwise it is removed.</p>
+      <p class="modal-err" x-show="delError" x-text="delError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="confirmDel = false" :disabled="deleting">Keep</button>
+        <button type="button" class="btn btn-danger" @click="remove()" :disabled="deleting" x-text="deleting ? 'Working…' : 'Delete'"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" x-show="toast" x-cloak x-transition.opacity role="status" x-text="toast"></div>
+</div>
+{% endblock %}

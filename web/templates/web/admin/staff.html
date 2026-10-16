@@ -1,0 +1,297 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/team.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  {% if tm_init.perms.create %}<button type="button" class="btn btn-primary top-act" onclick="window.dispatchEvent(new CustomEvent('person-new'))">{% icon "plus" 18 %}<span>Add person</span></button>{% endif %}
+{% endblock %}
+{% block content %}
+{{ tm_init|json_script:"tm-init" }}
+<div x-data="teamPage(JSON.parse(document.getElementById('tm-init').textContent))"
+     @person-new.window="openForm(null)" @keydown.escape.window="escape()">
+
+  <template x-if="init0.start === 'access'">
+    <p class="tm-lead">Pick a person to choose what they can see and do. Admins always have full access.</p>
+  </template>
+
+  <section class="panel filters">
+    <div class="f-row">
+      <label class="f-search">
+        {% icon "search" 18 %}
+        <input type="search" x-model="q" @input.debounce.300ms="sync()" placeholder="Search name, username, phone or role" aria-label="Search people">
+      </label>
+      <div class="chips" role="radiogroup" aria-label="Show">
+        <template x-for="c in chips" :key="c.key">
+          <button type="button" class="chip" role="radio" :aria-checked="(view === c.key).toString()"
+                  :class="{ 'is-on': view === c.key }" @click="view = c.key"><span x-text="c.label"></span><span class="chip-n" x-text="c.n"></span></button>
+        </template>
+      </div>
+    </div>
+  </section>
+
+  <div class="tm-seats" x-show="!loading && limit" x-cloak>
+    <div class="tm-seat-bar"><span :style="'width:' + Math.min(100, activeCount / Math.max(1, limit) * 100) + '%'" :class="{ 'is-full': atLimit }"></span></div>
+    <b x-text="activeCount + ' of ' + limit + ' people can sign in'"></b>
+    <span class="tm-roles"><template x-for="r in roleCounts" :key="r.key"><span x-text="r.n + ' ' + r.label + (r.n === 1 ? '' : 's')"></span></template></span>
+    <span class="txt-due" x-show="atLimit">Plan limit reached — turn someone off to add another.</span>
+  </div>
+
+  <section class="panel">
+    <template x-if="error">
+      <div class="empty">
+        <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+        <h2>Couldn't load people</h2><p x-text="error"></p>
+        <button class="btn btn-ghost" @click="load()">Try again</button>
+      </div>
+    </template>
+    <template x-if="!error">
+      <div>
+        <table class="dt tm-table" :class="{ 'is-loading': loading }">
+          <thead><tr><th>Person</th><th>Role</th><th class="hide-md">Access</th><th class="hide-md">Contact</th><th class="hide-md">Last active</th><th class="c">Status</th></tr></thead>
+          <tbody>
+            <template x-for="u in rows" :key="u.id">
+              <tr tabindex="0" @click="open(u, init0.start === 'access' ? 'access' : 'details')" @keydown.enter="open(u, init0.start === 'access' ? 'access' : 'details')" :aria-label="'Open ' + u.name" :class="{ 'is-void': !u.is_active }">
+                <td data-k="Person">
+                  <span class="tm-person">
+                    <span class="tm-av" :style="'--h:' + hue(u)" x-text="initials(u)"></span>
+                    <span><b><span x-text="u.name"></span><span class="tm-you" x-show="u.is_me">You</span></b><span class="sub" x-text="u.username"></span></span>
+                  </span>
+                </td>
+                <td data-k="Role"><span class="pill" :class="'tm-r-' + u.role.toLowerCase()" x-text="roleLabel(u.role)"></span></td>
+                <td class="hide-md" data-k="Access">
+                  <span class="tm-reach"><i><em :style="'width:' + (reach(u).n / modules.length * 100) + '%'"></em></i><span x-text="reach(u).text"></span></span>
+                  <span class="sub" x-text="sourceLabel(u)"></span>
+                </td>
+                <td class="hide-md" data-k="Contact"><span x-text="u.phone || '—'"></span><span class="sub" x-text="u.email"></span></td>
+                <td class="hide-md" data-k="Last active" x-text="ago(u.last_login)"></td>
+                <td class="c" data-k="Status"><span class="pill" :class="u.is_active ? 'st-paid' : 'st-off'" x-text="u.is_active ? 'Active' : 'Off'"></span></td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !people.length ? 4 : 0)" :key="'sk' + i">
+              <tr class="sk"><td><span class="sk-line" style="width:50%"></span></td><td><span class="sk-line" style="width:40%"></span></td><td class="hide-md"></td><td class="hide-md"></td><td class="hide-md"></td><td></td></tr>
+            </template>
+          </tbody>
+        </table>
+        <div class="empty" x-show="!loading && !rows.length" x-cloak>
+          <div class="tile">{% icon "users" 26 %}</div>
+          <h2 x-text="people.length > 1 || q ? 'Nobody matches' : 'Just you so far'"></h2>
+          <p x-text="people.length > 1 || q ? 'Try another search or filter.' : 'Add the people who work in your shop. Each gets their own sign-in, and you choose what they can do.'"></p>
+          <template x-if="init0.perms.create && !q"><button class="btn btn-primary" @click="openForm(null)">{% icon "plus" 18 %} Add person</button></template>
+        </div>
+      </div>
+    </template>
+  </section>
+
+  {# ───────────── person drawer ───────────── #}
+  <div class="drawer-wrap" x-show="sel" x-cloak x-transition.opacity.duration.150ms @click.self="shut()">
+    <aside class="drawer drawer-wide" role="dialog" aria-modal="true" aria-label="Person" x-show="sel"
+           x-transition:enter="drawer-in" x-transition:enter-start="drawer-from" x-transition:enter-end="drawer-to">
+      <template x-if="sel">
+        <div class="drawer-body">
+          <header class="drawer-head">
+            <div class="tm-head">
+              <span class="tm-av lg" :style="'--h:' + hue(sel)" x-text="initials(sel)"></span>
+              <div><h2 x-text="sel.name"></h2>
+                <span class="tm-head-sub"><span class="pill" :class="'tm-r-' + sel.role.toLowerCase()" x-text="roleLabel(sel.role)"></span>
+                  <span class="pill st-off" x-show="!sel.is_active">Off</span><span x-text="sel.username"></span></span></div>
+            </div>
+            <div class="drawer-actions">
+              <template x-if="sel.can_edit && init0.perms.edit"><button type="button" class="btn btn-ghost" @click="openForm(sel)">{% icon "pencil" 16 %} <span>Edit</span></button></template>
+              <button type="button" class="icon-btn" @click="shut()" aria-label="Close">{% icon "x" 18 %}</button>
+            </div>
+          </header>
+
+          <div class="dtabs tm-tabs" role="tablist">
+            <button type="button" role="tab" :aria-selected="(tab === 'details').toString()" :class="{ 'is-on': tab === 'details' }" @click="setTab('details')">Details</button>
+            <button type="button" role="tab" :aria-selected="(tab === 'access').toString()" :class="{ 'is-on': tab === 'access' }" @click="setTab('access')">What they can do</button>
+          </div>
+
+          {# details #}
+          <div class="tm-body" x-show="tab === 'details'">
+            <dl class="pf-kv">
+              <div><dt>Username</dt><dd x-text="sel.username"></dd></div>
+              <div><dt>Role</dt><dd><span x-text="roleLabel(sel.role)"></span><small class="tm-note" x-text="(roles[sel.role] || {}).note"></small></dd></div>
+              <div><dt>Phone</dt><dd x-text="sel.phone || '—'"></dd></div>
+              <div><dt>Email</dt><dd x-text="sel.email || '—'"></dd></div>
+              <div><dt>Last active</dt><dd x-text="ago(sel.last_login)"></dd></div>
+              <div><dt>Added</dt><dd x-text="date(sel.date_joined)"></dd></div>
+            </dl>
+            <template x-if="sel.can_edit && init0.perms.edit && !sel.is_me">
+              <div class="tm-actions">
+                <div class="tm-act">
+                  <div><b>Password</b><small>Forgot it? Give them a new one. Their old password stops working.</small></div>
+                  <button type="button" class="btn btn-ghost" @click="openPw()">{% icon "key" 16 %} New password</button>
+                </div>
+                <div class="tm-act" :class="{ 'is-danger': sel.is_active }">
+                  <div><b x-text="sel.is_active ? 'Turn off sign-in' : 'Turn sign-in back on'"></b>
+                    <small x-text="sel.is_active ? 'For someone who left. Their sales and receipts keep their name.' : 'They can sign in again with their current password.'"></small></div>
+                  <button type="button" class="btn btn-ghost" :class="{ 'danger-txt': sel.is_active }" @click="askToggle()" x-text="sel.is_active ? 'Turn off' : 'Turn on'"></button>
+                </div>
+              </div>
+            </template>
+            <p class="tm-self" x-show="sel.is_me">This is you. Change your own password from the menu at the top right.</p>
+          </div>
+
+          {# access matrix #}
+          <div class="tm-body" x-show="tab === 'access'">
+            <template x-if="sel.role === 'ADMIN'">
+              <div class="pf-alert">{% icon "shield" 18 %}<span><b>Admins can do everything</b> in the software, so there is nothing to choose here. Change their role to limit what they can do.</span></div>
+            </template>
+            <template x-if="sel.role !== 'ADMIN' && !permEditable">
+              <div class="pf-alert">{% icon "lock" 18 %}<span>Only an admin can change what someone can do.</span></div>
+            </template>
+            <template x-if="sel.role !== 'ADMIN'">
+              <div>
+                <div class="tm-perm-top" x-show="permEditable">
+                  <span x-text="sourceLabel(sel) === 'Role defaults' ? 'Using the standard ' + roleLabel(sel.role).toLowerCase() + ' access.' : 'Customised for ' + sel.name + '.'"></span>
+                  <span class="tm-presets">
+                    <button type="button" class="chip" @click="preset('view')">View only</button>
+                    <button type="button" class="chip" @click="preset('all')">Everything</button>
+                    <button type="button" class="chip" @click="preset('none')">Nothing</button>
+                    <button type="button" class="btn-link" @click="askResetPerms()" x-show="sel.permission_source !== 'ROLE'">Role defaults</button>
+                  </span>
+                </div>
+                <table class="tm-matrix" :class="{ 'is-ro': !permEditable }">
+                  <thead><tr><th>Area</th><template x-for="a in acts" :key="a[0]"><th class="c" x-text="a[1]"></th></template><th class="c hide-sm">All</th></tr></thead>
+                  <tbody>
+                    <template x-for="m in modules" :key="m.key">
+                      <tr :class="{ 'is-none': !has(m, 'view') }">
+                        <td><b x-text="m.label"></b><small x-show="m.note" x-text="m.note"></small>
+                          <span class="tm-extra" x-show="m.extra">
+                            <template x-for="x in (m.extra || [])" :key="x[0]">
+                              <button type="button" class="tm-x" :class="{ 'is-on': has(m, x[0]) }" @click="flip(m, x[0])" :disabled="!permEditable"
+                                      :aria-pressed="has(m, x[0]).toString()"><i>{% icon "check" 11 %}</i><span x-text="x[1]"></span></button>
+                            </template>
+                          </span>
+                        </td>
+                        <template x-for="a in acts" :key="a[0]">
+                          <td class="c">
+                            <template x-if="hasAct(m, a[0])">
+                              <button type="button" class="tm-box" :class="{ 'is-on': has(m, a[0]) }" @click="flip(m, a[0])" :disabled="!permEditable"
+                                      role="checkbox" :aria-checked="has(m, a[0]).toString()" :aria-label="a[1] + ' ' + m.label">{% icon "check" 13 %}</button>
+                            </template>
+                          </td>
+                        </template>
+                        <td class="c hide-sm"><button type="button" class="tm-all" @click="flipRow(m)" :disabled="!permEditable" x-text="rowAll(m) ? 'None' : 'All'"></button></td>
+                      </tr>
+                    </template>
+                  </tbody>
+                </table>
+                <p class="tm-foot">Turning off <b>View</b> hides that whole area from their menu. Adding, editing or deleting needs View too.</p>
+              </div>
+            </template>
+          </div>
+
+          <div class="tm-savebar" x-show="tab === 'access' && dirty" x-cloak x-transition.opacity>
+            <span x-text="changedCount + (changedCount === 1 ? ' change' : ' changes') + ' not saved'"></span>
+            <p class="modal-err" x-show="pError" x-text="pError"></p>
+            <button type="button" class="btn btn-ghost" @click="resetDraft()" :disabled="pSaving">Undo</button>
+            <button type="button" class="btn btn-primary" @click="savePerms()" :disabled="pSaving" x-text="pSaving ? 'Saving…' : 'Save access'"></button>
+          </div>
+        </div>
+      </template>
+    </aside>
+  </div>
+
+  {# ───────────── add / edit person ───────────── #}
+  <div class="modal-wrap" x-show="formOpen" x-cloak x-transition.opacity.duration.120ms @click.self="!formSaving && !done && (formOpen = false)" role="dialog" aria-modal="true" aria-labelledby="tm-title">
+    <form class="modal modal-wide" @submit.prevent="done ? openDone() : saveForm()" novalidate>
+      <template x-if="!done"><div>
+        <h2 id="tm-title" x-text="form.id ? 'Edit ' + form.first_name : 'Add person'"></h2>
+        <p class="modal-sub" x-show="!form.id">They get their own sign-in. Everything they record carries their name.</p>
+        <div class="fld-row">
+          <div class="fld" :class="{ 'has-error': fe.first_name }"><label class="fld-label" for="tm-first">First name <i>*</i></label>
+            <input id="tm-first" x-ref="fFirst" class="in" type="text" maxlength="150" x-model="form.first_name" @input="fe.first_name = ''; suggest()"><p class="fld-err" x-show="fe.first_name" x-text="fe.first_name"></p></div>
+          <div class="fld"><label class="fld-label" for="tm-last">Last name</label><input id="tm-last" class="in" type="text" maxlength="150" x-model="form.last_name" @input="suggest()"></div>
+        </div>
+        <div class="fld-row">
+          <div class="fld"><label class="fld-label" for="tm-phone">Phone</label><input id="tm-phone" class="in" type="tel" maxlength="20" x-model="form.phone"></div>
+          <div class="fld" :class="{ 'has-error': fe.email }"><label class="fld-label" for="tm-email">Email</label>
+            <input id="tm-email" class="in" type="email" maxlength="254" x-model="form.email" @input="fe.email = ''"><p class="fld-err" x-show="fe.email" x-text="fe.email"></p></div>
+        </div>
+        <div class="fld" x-show="!form.me">
+          <label class="fld-label">Role <i>*</i></label>
+          <div class="tm-rolepick" role="radiogroup">
+            <template x-for="r in roleChoices" :key="r">
+              <button type="button" role="radio" class="tm-role" :aria-checked="(form.role === r).toString()" :class="{ 'is-on': form.role === r }" @click="form.role = r; fe.role = ''">
+                <b x-text="roles[r].label"></b><small x-text="roles[r].note"></small></button>
+            </template>
+          </div>
+          <p class="fld-err" x-show="fe.role" x-text="fe.role"></p>
+          <p class="fld-hint warn" x-show="form.id && form.role !== form.was" x-cloak>Changing the role resets what they can do to that role's standard access.</p>
+        </div>
+        <div class="fld-row">
+          <div class="fld" :class="{ 'has-error': fe.username }"><label class="fld-label" for="tm-user">Username <i>*</i></label>
+            <input id="tm-user" class="in" type="text" maxlength="150" x-model="form.username" @input="form.userTouched = true; fe.username = ''" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <p class="fld-err" x-show="fe.username" x-text="fe.username"></p></div>
+          <div class="fld" :class="{ 'has-error': fe.password }" x-show="!form.id"><label class="fld-label" for="tm-pw">Password <i>*</i></label>
+            <div class="pf-pw"><input id="tm-pw" class="in" type="text" maxlength="128" x-model="form.password" @input="fe.password = ''" autocomplete="new-password" spellcheck="false">
+              <button type="button" class="icon-btn" title="Make another" aria-label="Make another password" @click="form.password = genPw(); fe.password = ''">{% icon "refresh" 17 %}</button></div>
+            <p class="fld-err" x-show="fe.password" x-text="fe.password"></p></div>
+        </div>
+      </div></template>
+
+      <template x-if="done"><div class="pf-done">
+        <div class="pf-done-ic">{% icon "check-circle" 30 %}</div>
+        <h2 x-text="done.user.name + ' can sign in'"></h2>
+        <p>Give them these details. Next, check what they can do — <span x-text="roleLabel(done.user.role).toLowerCase()"></span> access is set for now.</p>
+        <div class="pf-cred">
+          <div><span>Sign in at</span><b x-text="signInUrl"></b></div>
+          <div><span>Username</span><b x-text="done.user.username"></b></div>
+          <div><span>Password</span><b x-text="done.password"></b></div>
+        </div>
+        <button type="button" class="btn btn-ghost pf-copy" @click="copyCreds(done.user.username, done.password)">
+          <span x-show="!copied">Copy sign-in details</span><span x-show="copied">{% icon "check" 16 %} Copied</span></button>
+      </div></template>
+
+      <p class="modal-err" x-show="formError" x-text="formError"></p>
+      <div class="modal-actions">
+        <template x-if="!done"><div class="pf-done-act">
+          <button type="button" class="btn btn-ghost" @click="formOpen = false" :disabled="formSaving">Cancel</button>
+          <button type="submit" class="btn btn-primary" :disabled="formSaving" x-text="formSaving ? 'Saving…' : (form.id ? 'Save changes' : 'Add person')"></button>
+        </div></template>
+        <template x-if="done"><div class="pf-done-act">
+          <button type="button" class="btn btn-ghost" @click="formOpen = false">Done</button>
+          <button type="submit" class="btn btn-primary">Set what they can do</button>
+        </div></template>
+      </div>
+    </form>
+  </div>
+
+  {# ───────────── new password ───────────── #}
+  <div class="modal-wrap" x-show="pwOpen" x-cloak x-transition.opacity.duration.120ms @click.self="!pwSaving && (pwOpen = false)" role="dialog" aria-modal="true" aria-labelledby="tmpw-title">
+    <form class="modal" @submit.prevent="pwDone ? (pwOpen = false) : savePw()" novalidate>
+      <h2 id="tmpw-title" x-text="pwDone ? 'Password changed' : 'New password'"></h2>
+      <p class="modal-sub" x-show="!pwDone">For <b x-text="sel && sel.name"></b>. Their old password stops working.</p>
+      <template x-if="!pwDone"><div class="fld" :class="{ 'has-error': pwErr }">
+        <div class="pf-pw"><input class="in" type="text" maxlength="128" x-model="pw" @input="pwErr = ''" spellcheck="false" aria-label="New password">
+          <button type="button" class="icon-btn" @click="pw = genPw(); pwErr = ''" title="Make another" aria-label="Make another password">{% icon "refresh" 17 %}</button></div>
+        <p class="fld-err" x-show="pwErr" x-text="pwErr"></p>
+      </div></template>
+      <template x-if="pwDone"><div>
+        <div class="pf-cred"><div><span>Username</span><b x-text="sel.username"></b></div><div><span>Password</span><b x-text="pwDone"></b></div></div>
+        <button type="button" class="btn btn-ghost pf-copy" @click="copyCreds(sel.username, pwDone)">
+          <span x-show="!copied">Copy sign-in details</span><span x-show="copied">{% icon "check" 16 %} Copied</span></button>
+      </div></template>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" x-show="!pwDone" @click="pwOpen = false" :disabled="pwSaving">Cancel</button>
+        <button type="submit" class="btn btn-primary" :disabled="pwSaving" x-text="pwDone ? 'Done' : (pwSaving ? 'Saving…' : 'Change password')"></button>
+      </div>
+    </form>
+  </div>
+
+  {# ───────────── confirm ───────────── #}
+  <div class="modal-wrap" x-show="confirm" x-cloak x-transition.opacity.duration.120ms @click.self="!busy && (confirm = null)" role="dialog" aria-modal="true">
+    <div class="modal">
+      <div class="modal-icon" :class="{ 'is-ok': confirm && !confirm.danger }">{% icon "shield" 22 %}</div>
+      <h2 x-text="confirm && confirm.title"></h2>
+      <p x-text="confirm && confirm.text"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="confirm = null" :disabled="busy">Cancel</button>
+        <button type="button" class="btn" :class="confirm && confirm.danger ? 'btn-danger' : 'btn-primary'" @click="doConfirm()" :disabled="busy" x-text="busy ? 'Working…' : (confirm && confirm.btn)"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" x-show="toast" x-cloak x-transition.opacity role="status" x-text="toast"></div>
+</div>
+{% endblock %}

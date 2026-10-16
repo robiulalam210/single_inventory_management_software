@@ -1,0 +1,143 @@
+{% extends "web/base.html" %}
+{% load static web_tags %}
+{% block head %}<script src="{% static 'web/js/lookup.js' %}"></script>{% endblock %}
+{% block topbar_actions %}
+  {% if lk.perms.create %}<button type="button" class="btn btn-primary top-act" onclick="window.dispatchEvent(new CustomEvent('lookup-new'))">{% icon "plus" 18 %}<span>New {{ lk.singular }}</span></button>{% endif %}
+{% endblock %}
+{% block content %}
+{{ lk|json_script:"lk-cfg" }}
+<div x-data="lookupList(JSON.parse(document.getElementById('lk-cfg').textContent))"
+     @lookup-new.window="openForm(null)" @keydown.escape.window="escape()">
+
+  {# ───────────── first run ───────────── #}
+  <template x-if="!loading && !error && !items.length">
+    <section class="panel un-start">
+      <div class="tile">{% icon lk.icon 28 %}</div>
+      <h2 x-text="'No ' + cfg.plural + ' yet'"></h2>
+      <p x-text="cfg.explain"></p>
+      <template x-if="perms.create">
+        <div>
+          <div class="lk-ex" x-show="cfg.examples.length">
+            <span>Quick add</span>
+            <template x-for="n in unusedExamples" :key="n">
+              <button type="button" class="chip" @click="quickAdd(n)" :disabled="adding[n]">{% icon "plus" 14 %} <span x-text="n"></span></button>
+            </template>
+          </div>
+          <button type="button" class="btn btn-primary" @click="openForm(null)">{% icon "plus" 18 %} <span x-text="'New ' + cfg.singular"></span></button>
+        </div>
+      </template>
+    </section>
+  </template>
+
+  <template x-if="error">
+    <section class="panel empty">
+      <div class="tile" style="background:var(--red-wash);color:var(--red)">{% icon "alert" 26 %}</div>
+      <h2 x-text="'Couldn\'t load ' + cfg.plural"></h2><p x-text="error"></p>
+      <button class="btn btn-ghost" @click="load()">Try again</button>
+    </section>
+  </template>
+
+  <template x-if="!error && (loading || items.length)">
+    <div>
+      <p class="tm-lead" x-text="cfg.explain"></p>
+      <section class="panel filters">
+        <div class="f-row">
+          <label class="f-search">
+            {% icon "search" 18 %}
+            <input type="search" x-model="q" :placeholder="'Search ' + cfg.plural" :aria-label="'Search ' + cfg.plural">
+          </label>
+          <div class="chips" role="radiogroup" aria-label="Show">
+            <template x-for="c in views" :key="c.key">
+              <button type="button" class="chip" role="radio" :aria-checked="(view === c.key).toString()"
+                      :class="{ 'is-on': view === c.key }" @click="view = c.key"><span x-text="c.label"></span><span class="chip-n" x-text="c.n"></span></button>
+            </template>
+          </div>
+        </div>
+        <div class="f-row lk-ex lk-ex-row" x-show="perms.create && unusedExamples.length && items.length < 12" x-cloak>
+          <span>Quick add</span>
+          <template x-for="n in unusedExamples" :key="n">
+            <button type="button" class="chip" @click="quickAdd(n)" :disabled="adding[n]">{% icon "plus" 14 %} <span x-text="n"></span></button>
+          </template>
+        </div>
+      </section>
+
+      <section class="panel">
+        <table class="dt un-table" :class="{ 'is-loading': loading }">
+          <thead><tr><th x-text="cfg.singular_title"></th><th>Used by</th><th class="c">Status</th><th class="r"><span class="sr-only">Actions</span></th></tr></thead>
+          <tbody>
+            <template x-for="x in rows" :key="x.id">
+              <tr :class="{ 'is-void': x.is_active === false, 'is-click': perms.edit }" @click="openForm(x)" :tabindex="perms.edit ? 0 : -1" @keydown.enter="openForm(x)">
+                <td data-k="Unit"><b x-text="x.name"></b><span class="sub" x-show="x.description" x-text="x.description"></span></td>
+                <td data-k="Used by">
+                  <template x-if="used(x) && productsLink(x)"><a class="lk-link" :href="productsLink(x)" @click.stop x-text="usage(x)"></a></template>
+                  <span x-show="!(used(x) && productsLink(x))" :class="used(x) ? '' : 'muted'" x-text="usage(x)"></span>
+                </td>
+                <td class="c" data-k="Status"><span class="pill" :class="x.is_active === false ? 'st-off' : 'st-paid'" x-text="x.is_active === false ? 'Inactive' : 'Active'"></span></td>
+                <td class="r un-acts" @click.stop>
+                  <template x-if="perms.edit"><button type="button" class="icon-btn sm" @click="openForm(x)" :aria-label="'Edit ' + x.name" title="Edit">{% icon "pencil" 16 %}</button></template>
+                  <template x-if="perms.edit">
+                    <button type="button" class="icon-btn sm" @click="toggle(x)" :disabled="!!busy[x.id]"
+                            :aria-label="(x.is_active === false ? 'Activate ' : 'Deactivate ') + x.name" :title="x.is_active === false ? 'Activate' : 'Deactivate — hide from new products'">
+                      <span x-show="x.is_active !== false">{% icon "eye-dim" 16 %}</span><span x-show="x.is_active === false">{% icon "eye" 16 %}</span>
+                    </button>
+                  </template>
+                  <template x-if="perms.delete"><button type="button" class="icon-btn sm danger" @click="askDelete(x)" :aria-label="'Delete ' + x.name" title="Delete">{% icon "trash" 16 %}</button></template>
+                </td>
+              </tr>
+            </template>
+            <template x-for="i in (loading && !items.length ? 5 : 0)" :key="'sk' + i">
+              <tr class="sk"><td><span class="sk-line" style="width:45%"></span></td><td><span class="sk-line" style="width:50%"></span></td><td></td><td></td></tr>
+            </template>
+          </tbody>
+        </table>
+        <p class="rows-empty" x-show="!loading && items.length && !rows.length" x-cloak
+           x-text="q ? 'Nothing matches “' + q + '”.' : (view === 'inactive' ? 'Nothing is inactive.' : 'Nothing active.')"></p>
+      </section>
+      <p class="un-foot" x-show="!loading && counts.inactive" x-cloak>Inactive ones stay on the products that already use them, but can't be picked for new products.</p>
+    </div>
+  </template>
+
+  {# ───────────── add / edit ───────────── #}
+  <div class="modal-wrap" x-show="formOpen" x-cloak x-transition.opacity.duration.120ms @click.self="formOpen = false" role="dialog" aria-modal="true" aria-labelledby="lk-title">
+    <form class="modal" @submit.prevent="saveForm()" novalidate>
+      <h2 id="lk-title" x-text="form.id ? 'Edit ' + cfg.singular : 'New ' + cfg.singular"></h2>
+      <div class="fld" :class="{ 'has-error': fe.name }">
+        <label class="fld-label" for="lk-name">Name <i>*</i></label>
+        <input id="lk-name" x-ref="lkName" class="in" type="text" maxlength="120" x-model="form.name" @input="fe.name = ''" :placeholder="cfg.examples.length ? 'e.g. ' + cfg.examples[0] : ''" autocomplete="off">
+        <p class="fld-err" x-show="fe.name" x-text="fe.name"></p>
+      </div>
+      <template x-if="cfg.has_description">
+        <div class="fld">
+          <label class="fld-label" for="lk-desc">Description</label>
+          <textarea id="lk-desc" class="in" rows="2" maxlength="500" x-model="form.description" placeholder="Optional"></textarea>
+        </div>
+      </template>
+      <p class="fld-hint warn" x-show="form.id && form.used" x-cloak
+         x-text="form.used + (form.used === 1 ? ' product uses' : ' products use') + ' this — renaming changes it on all of them.'"></p>
+      <label class="check lk-more" x-show="!form.id"><input type="checkbox" x-model="addMore"> Add another after this</label>
+      <p class="modal-err" x-show="formError" x-text="formError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="formOpen = false" :disabled="formSaving">Cancel</button>
+        <button type="submit" class="btn btn-primary" :disabled="formSaving" x-text="formSaving ? 'Saving…' : (form.id ? 'Save changes' : 'Add')"></button>
+      </div>
+    </form>
+  </div>
+
+  {# ───────────── delete ───────────── #}
+  <div class="modal-wrap" x-show="del" x-cloak x-transition.opacity.duration.120ms @click.self="del = null" role="dialog" aria-modal="true">
+    <div class="modal">
+      <div class="modal-icon">{% icon "trash" 22 %}</div>
+      <h2>Delete <span x-text="del && del.name"></span>?</h2>
+      <template x-if="del && used(del)"><p><b x-text="usage(del)"></b> use this, so it can't be removed. It will be marked <b>inactive</b> instead — those products keep it, but new products can't pick it.</p></template>
+      <template x-if="del && !used(del)"><p>No product uses this. It will be removed for good.</p></template>
+      <p class="modal-err" x-show="delError" x-text="delError"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" @click="del = null" :disabled="deleting">Keep</button>
+        <button type="button" class="btn btn-danger" @click="remove()" :disabled="deleting" x-text="deleting ? 'Working…' : (del && used(del) ? 'Make inactive' : 'Delete')"></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" x-show="toast" x-cloak x-transition.opacity role="status" x-text="toast"></div>
+</div>
+{% endblock %}
