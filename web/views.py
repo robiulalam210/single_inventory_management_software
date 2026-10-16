@@ -390,6 +390,20 @@ def sale_new_view(request):
 
 @web_login_required
 @never_cache
+def short_sale_view(request):
+    """
+    Short Sale — app এর "Short Sale" এর মতো: ক্যাটাগরি → পণ্য → সেল মোড (কেজি/গ্রাম/প্যাক) → পরিমাণ → Add।
+    এরপর customer, ছাড়/চার্জ ও পেমেন্ট Sale ফর্মের মতোই; সেভ হয় একই /api/sales/ এ।
+    """
+    if not has_perm(request.user, 'sales', 'create'):
+        return forbidden(request, 'Short Sale')
+    init = _sell_init(request)
+    init['customer'] = None
+    return render(request, 'web/sales/short.html', {'page_title': 'Short Sale', 'sell_init': init})
+
+
+@web_login_required
+@never_cache
 def pos_view(request):
     """
     POS Sale — কাউন্টারের দ্রুত বিক্রি: পণ্যের grid, barcode scan, cart, নগদ নিয়ে ফেরত হিসাব,

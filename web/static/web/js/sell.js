@@ -39,15 +39,19 @@
   // স্টক base unit এ (যেমন গ্রাম); qty × factor = base পরিমাণ।
   const isWeightUnit = (u) => /^(g|gm|gram|grams|গ্রাম)$/i.test(String(u || '').trim());
   function modesOf(p, basePrice, unitLabel) {
-    const out = [{ id: '', name: unitLabel || 'Unit', code: '', type: 'base', factor: 1, price: basePrice, flat: false }];
+    const out = [{ id: '', name: unitLabel || 'Unit', code: '', type: 'base', factor: 1, price: basePrice, flat: false, disc: 0, discType: 'fixed' }];
     (p.sale_modes || []).filter(m => m && m.is_active !== false).forEach(m => {
       const factor = n(m.conversion_factor) || 1;
       const flat = m.price_type === 'flat';
       const per = flat ? n(m.flat_price != null ? m.flat_price : m.effective_flat_price)
                        : r2((n(m.unit_price != null ? m.unit_price : m.effective_unit_price) || basePrice) * factor);
       if (!(per > 0)) return;
+      // এই মোডের নিজের ছাড় (ProductSaleMode.discount_*) — অনলাইন শপ ও অ্যাপের মতোই এখানেও ধরা হয়
+      const dv = n(m.discount_value);
+      const dt = m.discount_type === 'percentage' || m.discount_type === 'percent' ? 'percent' : 'fixed';
+      const disc = m.discount_type && dv > 0 ? dv : 0;
       out.push({ id: String(m.sale_mode_id), name: m.sale_mode_name, code: m.sale_mode_code || '', type: m.price_type,
-                 factor, price: per, flat });
+                 factor, price: per, flat, disc, discType: dt });
     });
     // "গ্রাম" মতো factor=1 unit-মোড থাকলে আলাদা base-ইউনিট অপশন (একই জিনিস) বাদ
     if (out.length > 1 && out.slice(1).some(m => m.factor === 1 && !m.flat)) out.shift();
@@ -61,11 +65,18 @@
     return packs[0] || modes[0];
   }
 
+  // ছাড়ের পরের দাম (দেখানোর জন্য) — লাইনের আসল হিসাব lineTotal() করে
+  function finalOf(m) {
+    if (!(m.disc > 0)) return m.price;
+    return r2(Math.max(0, m.discType === 'percent' ? m.price * (1 - m.disc / 100) : m.price - m.disc));
+  }
+
   function product(p) {
     const dt = p.discount_type === 'percentage' || p.discount_type === 'percent' ? 'percent' : 'fixed';
     const unit = (p.unit_info && (p.unit_info.code || p.unit_info.name)) || '';
     const price = n(p.selling_price);
     const modes = modesOf(p, price, unit);
+    modes.forEach(m => { m.final = finalOf(m); });
     const def = defaultMode(modes);
     return {
       id: p.id, name: p.name, sku: p.sku || '',
@@ -141,9 +152,9 @@
       errors: {}, saving: false, serverError: '', done: null,
 
       // ───── cart ─────
-      addProduct(p, qty) {
+      addProduct(p, qty, mode) {
         this.errors.items = '';
-        const m = p.def;
+        const m = mode || p.def;
         const ex = this.rows.find(r => r.product_id === p.id && r.mode === m.id);
         if (ex) {
           ex.qty = String(r3(n(ex.qty) + (qty || 1)));
@@ -154,7 +165,9 @@
           key: ++seq, product_id: p.id, name: p.name, sku: p.sku, stock: p.stock, unit: p.unit, cat: p.cat,
           modes: p.modes, mode: m.id, modeName: m.name, factor: m.factor, flat: m.flat, weight: p.weight,
           qty: String(qty || 1), price: String(m.price), listPrice: m.price,
-          discount: p.disc ? String(p.disc) : '', discount_type: p.discType, err: '', open: false,
+          pDisc: p.disc, pDiscType: p.discType,
+          discount: m.disc ? String(m.disc) : (p.disc ? String(p.disc) : ''), discount_type: m.disc ? m.discType : p.discType,
+          err: '', open: false,
         };
         row.err = this.stockErr(row);
         this.rows.push(row);
@@ -165,6 +178,8 @@
         const m = r.modes.find(x => x.id === String(id)) || r.modes[0];
         r.mode = m.id; r.modeName = m.name; r.factor = m.factor; r.flat = m.flat;
         r.price = String(m.price); r.listPrice = m.price;
+        r.discount = m.disc ? String(m.disc) : (r.pDisc ? String(r.pDisc) : '');
+        r.discount_type = m.disc ? m.discType : (r.pDiscType || 'fixed');
         r.err = this.stockErr(r);
       },
       step(r) { return r.weight && r.factor <= 1 ? 50 : 1; },      // গ্রামে ৫০ করে বাড়ে
@@ -380,6 +395,61 @@
   };
 
   // ─────────────────────────────── POS ───────────────────────────────
+  // ─────────────── Short Sale: ক্যাটাগরি → পণ্য → সেল মোড → পরিমাণ → "Add", তারপর customer/পেমেন্ট ───────────────
+  window.shortSale = function (init) {
+    return compose(window.saleForm(init), {
+      catalog: [], catLoading: true, catError: '',
+      qCat: '', qProd: '', qMode: '', qQty: '1', qPrice: '', qErr: '',
+
+      init() {
+        this.init0();
+        this.$watch('t.grand', (g) => { if (this.pay.followTotal) this.pay.received = g ? g.toFixed(2) : ''; });
+        this.loadCatalog();
+        this.$nextTick(() => this.$refs.qprod && this.$refs.qprod.focus());
+      },
+      async loadCatalog() {
+        try {
+          const r = await App.api('/api/products/', { query: { no_pagination: 'true', is_active: 'true' } });
+          this.catalog = listOf(r).map(product).sort((a, b) => a.name.localeCompare(b.name));
+          this.catError = '';
+        } catch (e) { this.catError = e.message; }
+        this.catLoading = false;
+      },
+      get qCats() { return [...new Set(this.catalog.map(p => p.cat))].sort((a, b) => a.localeCompare(b)); },
+      get qProducts() { return this.catalog.filter(p => !this.qCat || p.cat === this.qCat); },
+      get qP() { return this.catalog.find(p => String(p.id) === String(this.qProd)) || null; },
+      get qM() { const p = this.qP; return p ? (p.modes.find(m => m.id === this.qMode) || p.def) : null; },
+      get qAvail() { const p = this.qP, m = this.qM; return p ? Math.max(0, (p.stock - this.baseInCart(p.id)) / m.factor) : 0; },
+      // লাইনের টোটাল (ছাড় সহ) — সারিতে যোগ হলে যা হবে ঠিক তাই
+      get qTotal() {
+        const m = this.qM; if (!m) return 0;
+        return lineTotal(this.qQty, this.qPrice, m.disc || (this.qP && this.qP.disc) || 0, m.disc ? m.discType : (this.qP ? this.qP.discType : 'fixed'));
+      },
+      qPick() {
+        const p = this.qP; this.qErr = '';
+        if (!p) { this.qMode = ''; this.qPrice = ''; return; }
+        this.qMode = p.def.id; this.qQty = '1'; this.qPrice = String(p.def.price);
+      },
+      qSetMode() { const m = this.qM; if (m) { this.qPrice = String(m.price); } this.qErr = ''; },
+      qBump(d) { const m = this.qM; const st = this.qP && this.qP.weight && m && m.factor <= 1 ? 50 : 1; this.qQty = String(Math.max(0, r3(n(this.qQty) + d * st))); },
+      quickAdd() {
+        const p = this.qP, m = this.qM;
+        if (!p) { this.qErr = 'Choose a product.'; return; }
+        const q = n(this.qQty);
+        if (!(q > 0)) { this.qErr = 'Quantity must be above 0.'; return; }
+        if (!(n(this.qPrice) > 0)) { this.qErr = 'Enter the selling price.'; return; }
+        if (q * m.factor > p.stock - this.baseInCart(p.id) + 1e-9) {
+          this.qErr = `Only ${numFmt.format(Math.floor(this.qAvail * 1000) / 1000)} ${m.name} available.`; return;
+        }
+        const row = this.addProduct(p, q, m);
+        if (r2(this.qPrice) !== r2(m.price)) { row.price = String(r2(this.qPrice)); row.err = this.stockErr(row); }
+        this.qProd = ''; this.qMode = ''; this.qQty = '1'; this.qPrice = ''; this.qErr = '';
+        this.$nextTick(() => this.$refs.qprod && this.$refs.qprod.focus());
+      },
+      backToSearch() { this.$refs.qprod && this.$refs.qprod.focus(); },
+    });
+  };
+
   window.posScreen = function (init) {
     return compose(core(init), {
       catalog: [], catLoading: true, catError: '',

@@ -19,6 +19,7 @@ MENU = [
     {'title': 'Sales', 'icon': 'cart', 'items': [
         {'title': 'Sale', 'url': 'web:sale_new', 'perm': ('sales', 'create'), 'slug': 'sale'},
         {'title': 'POS Sale', 'url': 'web:pos', 'perm': ('sales', 'create'), 'slug': 'pos-sale'},
+        {'title': 'Short Sale', 'url': 'web:short_sale', 'perm': ('sales', 'create'), 'slug': 'short-sale'},
         {'title': 'Sale List', 'url': 'web:sales', 'perm': SALES_VIEW, 'slug': 'sale-list'},
     ]},
     {'title': 'Online Shop', 'icon': 'cart', 'items': [

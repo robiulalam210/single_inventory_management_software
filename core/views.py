@@ -1,3 +1,4 @@
+from copy import copy as _shallow_copy
 from django.shortcuts import render, redirect
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.decorators import login_required, user_passes_test
@@ -733,7 +734,7 @@ class ProfileAPIView(APIView):
     def patch(self, request):
         try:
             user = request.user
-            data = request.data.copy()
+            data = _shallow_copy(request.data)  # ফাইল আপলোডে deepcopy/pickle এরর এড়াতে
             
             # Remove sensitive fields
             sensitive_fields = ['password', 'is_superuser', 'is_staff', 'role', 'username']

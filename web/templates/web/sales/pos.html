@@ -32,7 +32,7 @@
           <b class="tile-name" x-text="p.name"></b>
           <span class="tile-sku" x-text="p.sku"></span>
           <span class="tile-foot">
-            <b x-text="taka(p.def.price) + (p.modes.length > 1 ? ' / ' + p.def.name : '')"></b>
+            <b x-text="taka(p.def.final) + (p.modes.length > 1 ? ' / ' + p.def.name : '')"></b><s x-show="p.def.disc > 0" x-text="taka(p.def.price)" style="font-size:11px;color:var(--muted);margin-left:4px"></s>
             <small :class="p.stock <= 0 ? 'out' : (p.alert && p.stock <= p.alert ? 'low' : '')"
                    x-text="p.stock <= 0 ? 'Out' : num(p.stock / p.def.factor) + ' ' + p.def.name + ' left'"></small>
           </span>
@@ -78,6 +78,12 @@
             <button type="button" @click="bump(r, 1)" :aria-label="'One more ' + r.name">+</button>
           </div>
           <b class="cl-amt" x-text="taka(lineOf(r))"></b>
+          <div class="cl-modes" x-show="r.modes.length > 1" role="group" :aria-label="'Sold by for ' + r.name">
+            <template x-for="m in r.modes" :key="m.id">
+              <button type="button" :class="{ on: m.id === r.mode }" :aria-pressed="m.id === r.mode"
+                      @click="setMode(r, m.id)" x-text="m.name + ' · ' + taka(m.final) + (m.disc > 0 ? ' ↓' : '')"></button>
+            </template>
+          </div>
           <div class="cl-edit" x-show="r.open" x-cloak>
             <label x-show="r.modes.length > 1"><span>Sold by</span>
               <select class="in" x-model="r.mode" @change="setMode(r, r.mode)">

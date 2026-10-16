@@ -733,7 +733,7 @@ textarea.in { height: auto; padding: 10px 12px; resize: vertical; line-height: 1
 .psearch-pop li.is-hi { background: var(--canvas); }
 
 .po-items { margin-top: 10px; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
-.po-row { display: grid; grid-template-columns: minmax(0, 1fr) 84px 118px 128px 116px 36px; gap: 10px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
+.po-row { display: grid; grid-template-columns: minmax(0, 1fr) 150px 84px 118px 128px 116px 36px; gap: 10px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
 .po-row:first-child { border-top: 0; }
 .po-row-head { background: var(--soft); font-size: 12px; font-weight: 600; color: var(--muted); padding-top: 9px; padding-bottom: 9px; }
 .po-row-head .num { text-align: right; }
@@ -746,6 +746,8 @@ textarea.in { height: auto; padding: 10px 12px; resize: vertical; line-height: 1
 .po-prod em.down { color: var(--green); }
 .po-cell { display: block; min-width: 0; }
 .po-k { display: none; }
+.po-mode .in { width: 100%; }
+.po-unit { font-size: 13px; color: var(--muted); }
 .in.num { text-align: right; height: 38px; padding: 0 10px; }
 .in-unit { display: flex; }
 .in-unit .in { border-top-right-radius: 0; border-bottom-right-radius: 0; min-width: 0; }
@@ -786,7 +788,7 @@ textarea.in { height: auto; padding: 10px 12px; resize: vertical; line-height: 1
 .po-foot { margin: 10px 0 0; text-align: center; font-size: 12.5px; color: var(--muted); }
 
 @media (max-width: 1280px) {
-  .po-row { grid-template-columns: minmax(0, 1fr) 72px 104px 116px 104px 32px; gap: 8px; }
+  .po-row { grid-template-columns: minmax(0, 1fr) 132px 72px 104px 116px 104px 32px; gap: 8px; }
   .po-charges { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 720px) {
@@ -794,6 +796,7 @@ textarea.in { height: auto; padding: 10px 12px; resize: vertical; line-height: 1
   .po-row-head { display: none; }
   .po-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 10px; padding: 12px; }
   .po-prod { grid-column: 1 / 3; grid-row: 1; }
+  .po-mode { grid-column: 1 / -1; }
   .po-row .po-x { grid-column: 3; grid-row: 1; justify-self: end; align-self: start; }
   .po-k { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 3px; }
   .po-cell .in.num { text-align: left; }
@@ -909,6 +912,11 @@ kbd { display: inline-block; min-width: 22px; padding: 1px 6px; border: 1px soli
 .cl-qty input { width: 42px; height: 30px; border: 0; text-align: center; font: 600 13.5px var(--font); color: var(--ink); background: var(--surface); }
 .cl-qty input:focus { outline: none; box-shadow: inset 0 0 0 2px var(--blue); }
 .cl-amt { text-align: right; font-size: 13.5px; white-space: nowrap; }
+/* POS: সারির নিচে সেল মোড বাটন (কেজি / ৫০০ গ্রাম / ২৫০ গ্রাম ...) — সবসময় দেখা যায় */
+.cl-modes { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; padding-top: 6px; }
+.cl-modes button { border: 1px solid var(--line-2); background: var(--canvas); color: var(--ink-2); border-radius: 99px; padding: 4px 10px; font: 500 12px var(--font); cursor: pointer; }
+.cl-modes button:hover { background: var(--blue-wash); color: var(--blue-ink); }
+.cl-modes button.on { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 600; }
 .cl-edit { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1.2fr auto; gap: 8px; align-items: end; padding-top: 6px; }
 .cl-edit label > span:first-child { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 3px; }
 .cl-edit .in.num { height: 34px; }
@@ -1880,3 +1888,16 @@ a.btn { text-decoration: none; }
   .guide-fab { width: 44px; height: 44px; padding: 0; justify-content: center; }
 }
 @media print { .guide-fab-wrap { display: none !important; } }
+
+
+/* Short Sale: দ্রুত লাইন যোগের ফর্ম */
+.qa { margin-bottom: 12px; }
+.qa-grid { display: grid; grid-template-columns: 1fr 1.6fr 1.3fr 130px 110px 100px auto; gap: 10px; align-items: end; }
+.qa-f { display: block; min-width: 0; }
+.qa-f .in { width: 100%; }
+.po-k2 { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 3px; }
+.qa-qty { width: 100%; }
+.qa-qty input { flex: 1; width: 100%; min-width: 0; }
+.qa-sum b { display: block; font-size: 15px; padding: 6px 0; text-align: right; }
+@media (max-width: 1280px) { .qa-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .qa-wide { grid-column: span 2; } }
+@media (max-width: 720px) { .qa-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .qa-wide { grid-column: 1 / -1; } }

@@ -12,7 +12,10 @@
     P100  factor 100   flat   → ১০০ গ্রাম প্যাকের দাম
   ফলে ওয়েব POS, মোবাইল অ্যাপ ও অনলাইন শপ একই ProductSaleMode টেবিল থেকে দাম নেবে।
 """
+import os
 from decimal import Decimal, ROUND_HALF_UP
+
+from django.conf import settings
 
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
@@ -51,6 +54,48 @@ ITEMS = [
 ]
 
 
+# পণ্যের ছবির পাথ (MEDIA_ROOT/inventory-products/ এর ভেতরের ফাইলের নাম)।
+# নতুন ছবি দিতে: ফাইলটা media/inventory-products/ এ রাখুন, এখানে নাম বদলান,
+# তারপর:  python manage.py seed_dry_fruits --update-images
+IMAGE_DIR = 'inventory-products'
+IMAGES = {
+    'কাঠবাদাম':        'Natural_Almonds_Halal_Nutrition_Poster.png',
+    'কাজুবাদাম':       'Premium_Halal_Cashew_Nuts_Poster.png',
+    'আখরোট':           'Natural_Walnut_Wellness_Ad.png',
+    'চিনাবাদাম':       'Halal_Business_Peanut_Harvest_Poster.png',
+    'চিয়া সিড':        'Natural_Chia_Seeds_Wellness_Advertisement.png',
+    'ফ্ল্যাক্স সিড':     'Natural_Flax_Seeds_Wellness_Poster.png',
+    'কুমড়ার বীজ':      'Natural_Pumpkin_Seeds_Wellness_Ad.png',
+    'সূর্যমুখীর বীজ':    'Halal_Business_Sunflower_Seeds_Poster.png',
+    'সুক্কারি খেজুর':    'Premium_Sukkari_Dates_Advertisement.png',
+    'কিশমিশ':          'Natural_Raisins_Product_Advertisement.png',
+    'কালোজিরা':        'Premium_Kalojira_Herbal_Product_Poster.png',
+    'লিচু ফুলের মধু':    'Lychee_Blossom_Honey_Advertisement.png',
+    'সরিষা ফুলের মধু':   'Mustard_Blossom_Honey_Delight_g5asMMY.png',
+    'সুন্দরবনের মধু':    'Sundarbans_Honey__Natures_Golden_Promise.png',
+}
+
+
+def _apply_image(product, update, force_path, missing):
+    """ছবির পাথ বসায়। ফাইল media তে না থাকলে (force_path ছাড়া) বসায় না, তালিকায় রাখে।
+    আগে থেকে ছবি থাকলে --update-images ছাড়া ছোঁয় না।"""
+    fname = IMAGES.get(product.name)
+    if not fname:
+        return False
+    rel = f'{IMAGE_DIR}/{fname}'
+    exists = os.path.exists(os.path.join(str(settings.MEDIA_ROOT), rel))
+    if not exists and not force_path:
+        missing.append(rel)
+        return False
+    if product.image and not update:
+        return False
+    if product.image and product.image.name == rel:
+        return False
+    product.image = rel
+    product.save(update_fields=['image'])
+    return True
+
+
 def _pack_price(per_kg, grams):
     """প্যাকের দাম: আনুপাতিক + ৩% প্যাকিং খরচ, ৫ টাকায় রাউন্ড।"""
     raw = D(per_kg) * D(grams) / D(1000) * D('1.03')
@@ -59,6 +104,12 @@ def _pack_price(per_kg, grams):
 
 class Command(BaseCommand):
     help = 'বাদাম/বীজ/খেজুর/মধুর ডেমো পণ্য ও কেজি-গ্রাম-প্যাক সেল মোড যোগ করে।'
+
+    def add_arguments(self, parser):
+        parser.add_argument('--update-images', action='store_true',
+                            help='আগে থেকে ছবি থাকলেও IMAGES তালিকার ছবি দিয়ে বদলাবে')
+        parser.add_argument('--force-image-paths', action='store_true',
+                            help='ফাইল media তে না থাকলেও পাথ বসাবে (পরে ফাইল রাখবেন)')
 
     @transaction.atomic
     def handle(self, *args, **opts):
@@ -73,6 +124,7 @@ class Command(BaseCommand):
             modes[code] = m
 
         made = 0
+        img_set, img_missing = 0, []
         for name, cat, cost_kg, sell_kg, stock_kg, off in ITEMS:
             c, _ = Category.objects.get_or_create(name=cat)
             per_g_cost = (D(cost_kg) / 1000).quantize(D('0.01'))
@@ -83,6 +135,7 @@ class Command(BaseCommand):
                 defaults=dict(category=c, unit=gram, purchase_price=per_g_cost, selling_price=per_g_sell,
                               opening_stock=stock_g, stock_qty=stock_g, alert_quantity=2000, is_active=True))
             made += int(created)
+            img_set += int(_apply_image(p, opts['update_images'], opts['force_image_paths'], img_missing))
 
             disc = dict(discount_type='percentage', discount_value=D(off)) if off else \
                 dict(discount_type=None, discount_value=None)
@@ -99,6 +152,9 @@ class Command(BaseCommand):
                 ProductSaleMode.objects.update_or_create(
                     product=p, sale_mode=modes[code], defaults=dict(is_active=True, **kw))
 
+        if img_missing:
+            self.stdout.write(self.style.WARNING('এই ছবির ফাইল media তে নেই (রাখলে আবার চালান):\n  ' + '\n  '.join(img_missing)))
+        self.stdout.write(f'ছবির পাথ বসেছে: {img_set} টা')
         call_command('seed_halal_business')   # হালাল বিজনেসের নাম/ফোন/ঠিকানা ডিফল্ট (শুধু ফাঁকা ঘর)
         self.stdout.write(self.style.SUCCESS(
             f'{made} টা নতুন পণ্য ({len(ITEMS) - made} টা আগে থেকেই ছিল), '

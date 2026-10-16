@@ -3,6 +3,7 @@ from rest_framework import serializers
 from django.conf import settings
 from django.db import transaction, IntegrityError
 import time
+from copy import copy as _shallow_copy
 import random
 from decimal import Decimal, InvalidOperation
 import re
@@ -582,7 +583,7 @@ class ProductCreateSerializer(serializers.ModelSerializer):
 
     def to_internal_value(self, data):
         if isinstance(data, dict):
-            data = data.copy()
+            data = _shallow_copy(data)  # deepcopy নয়: আপলোড করা ফাইল pickle হয় না
             
             if 'groups' in data and 'group' not in data:
                 data['group'] = data.pop('groups')
@@ -741,7 +742,7 @@ class ProductUpdateSerializer(serializers.ModelSerializer):
 
     def to_internal_value(self, data):
         if isinstance(data, dict):
-            data = data.copy()
+            data = _shallow_copy(data)  # deepcopy নয়: আপলোড করা ফাইল pickle হয় না
             
             if 'groups' in data and 'group' not in data:
                 data['group'] = data.pop('groups')
