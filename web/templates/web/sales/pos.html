@@ -48,7 +48,7 @@
   </section>
 
   {# ───────────── cart ───────────── #}
-  <aside class="panel pos-cart" aria-label="Current sale">
+  <aside class="panel pos-cart" id="pos-cart" aria-label="Current sale">
     <div class="cart-head">
       <h3>Current sale <span x-show="rows.length" x-text="'(' + rows.length + ')'"></span></h3>
       <button type="button" class="btn-link" x-show="rows.length" x-cloak @click="clearCart()">Clear</button>
@@ -220,5 +220,15 @@
   </div>
 
   <div class="pos-flash" x-show="flashMsg" x-cloak x-transition.opacity role="status" x-text="flashMsg"></div>
+  {# ছোট স্ক্রিনে: Charge বাটন দেখা না গেলে নিচে ভাসমান বার — ট্যাপ করলে কার্টে নামে #}
+  <button type="button" class="pos-fcart" x-cloak
+          x-data="{ vis: false }" x-init="if ('IntersectionObserver' in window) new IntersectionObserver((e) => { vis = e[0].isIntersecting; }).observe(document.querySelector('.pos-charge'))"
+          x-show="rows.length && !vis" x-transition.opacity.duration.150ms
+          @click="document.getElementById('pos-cart').scrollIntoView({ behavior: 'smooth', block: 'start' })"
+          aria-label="Go to current sale">
+    <span class="pos-fcart-n" x-text="rows.length"></span>
+    <span class="pos-fcart-l">Cart</span>
+    <b x-text="taka(t.grand)"></b>
+  </button>
 </div>
 {% endblock %}

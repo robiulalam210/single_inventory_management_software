@@ -62,7 +62,7 @@
     .brandlink{display:flex;align-items:center;gap:10px;text-decoration:none;min-width:0}
     .brandlink:hover .logo{transform:rotate(-8deg) scale(1.06)}
     .brandname{font-weight:700;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34vw}
-    .hsearch{flex:1;position:relative;min-width:0}
+    .hsearch{flex:1;position:relative;min-width:140px}
     .hsearch input{padding-left:38px;border-radius:99px;background:var(--bg);transition:box-shadow .25s,border-color .25s}
     .hsearch input:focus{border-color:var(--brand);box-shadow:0 0 0 4px color-mix(in srgb,var(--brand) 16%,transparent);outline:none}
     .hsearch svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--muted)}
@@ -78,7 +78,8 @@
     .cartbtn.bump{animation:bump .5s var(--ease)}
     @keyframes bump{30%{transform:scale(1.14)}60%{transform:scale(.96)}}
     .hide-s{display:inline-flex}
-    @media (max-width:640px){.hide-s{display:none}.brandlink{flex:1}.brandname{max-width:none}.hrow{flex-wrap:wrap}.hsearch{order:9;flex-basis:100%}.cartbtn .lbl{display:none}.cartbtn{padding:9px 12px}}
+    @media (max-width:900px){.hrow{flex-wrap:wrap}.brandlink{flex:1}.brandname{max-width:none}.hsearch{order:9;flex-basis:100%}}
+    @media (max-width:640px){.hide-s{display:none}.cartbtn .lbl{display:none}.cartbtn{padding:9px 12px}}
     .closed{background:var(--warn-bg);color:var(--warn-ink);text-align:center;padding:10px 12px;font-size:14px;font-weight:500}
 
     /* ---------- hero (the one orchestrated moment) ---------- */

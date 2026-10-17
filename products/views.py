@@ -667,6 +667,10 @@ class SaleModeViewSet(BaseInventoryCRUDViewSet):
     queryset = SaleMode.objects.all()
     serializer_class = SaleModeSerializer
     permission_classes = [permissions.IsAuthenticated]
+    # বেস ক্লাসের create/update নামের duplicate চেকে model_class ব্যবহার করে — আগে এটা None ছিল,
+    # তাই নাম সহ ফর্ম সেভ করলে "'NoneType' object has no attribute 'objects'" আসত
+    model_class = SaleMode
+    item_name = "Sale mode"
     
     def get_queryset(self):
         qs = SaleMode.objects.all().select_related('base_unit')
